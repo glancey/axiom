@@ -1,1 +1,0 @@
-Invalid formula: expected connective at position 2
