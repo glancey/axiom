@@ -35,7 +35,7 @@ pub struct logical_symbol(String);
 impl logical_symbol {
     pub fn new(s: String) -> Result<Self> {
         const VALID: &[&str] = &[
-            "/\\", "\\/", "=>", "\u{007E}", "<=>",
+            "\u{2227}", "\u{2228}", "=>", "\u{007E}", "<=>",
             "\u{2200}", "\u{018E}", "==", "(", ")",
         ];
         if VALID.contains(&s.as_str()) {
@@ -49,6 +49,8 @@ impl logical_symbol {
 /// A named symbol used to build terms and relations.
 /// Must not be a `logical_symbol` or an `individual_variable`.
 /// Carries a `rank` indicating the number of arguments the symbol takes.
+/// Example: In mathematical terms, an operation, O, of rank 10, would be 
+/// represented as O(a0, a1, a2,... a9).
 #[allow(non_camel_case_types)]
 pub struct operation_symbol {
     pub symbol: String,
@@ -78,6 +80,8 @@ impl individual_constant {
 }
 
 /// An `operation_symbol` of rank 1–5 used to denote a relation between individuals.
+/// Example: In mathematical terms, a Relation, R, of rank 4, would be 
+/// represented as R(a0, a1, a2, a3, a4).
 #[allow(non_camel_case_types)]
 pub struct relation_symbol(pub operation_symbol);
 
@@ -92,6 +96,8 @@ impl relation_symbol {
 
 /// An `operation_symbol` of rank m > 0 applied to exactly m terms.
 /// `vars` must have the same length as `symbol.rank`.
+/// Example: In logical terms, an operation of rank m is some process applied to all
+/// the members of an array of size m.
 #[allow(non_camel_case_types)]
 pub struct operation {
     pub symbol: operation_symbol,
@@ -180,8 +186,8 @@ impl Formula {
                 self.value.unwrap_or(false)
             }
             FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
-                "/\\" => formulas.iter().all(|f| f.is_true(context)),
-                "\\/" => formulas.iter().any(|f| f.is_true(context)),
+                "\u{2227}" => formulas.iter().all(|f| f.is_true(context)),
+                "\u{2228}" => formulas.iter().any(|f| f.is_true(context)),
                 "\u{007E}" => formulas.first().map_or(false, |f| !f.is_true(context)),
                 "=>" => {
                     formulas.len() != 2
@@ -205,8 +211,8 @@ mod tests {
 
     #[test]
     fn logical_symbol_valid() {
-        assert!(logical_symbol::new("/\\".to_string()).is_ok());
-        assert!(logical_symbol::new("\\/".to_string()).is_ok());
+        assert!(logical_symbol::new("\u{2227}".to_string()).is_ok());
+        assert!(logical_symbol::new("\u{2228}".to_string()).is_ok());
         assert!(logical_symbol::new("=>".to_string()).is_ok());
         assert!(logical_symbol::new("\u{007E}".to_string()).is_ok());
         assert!(logical_symbol::new("<=>".to_string()).is_ok());
@@ -256,7 +262,7 @@ mod tests {
 
     #[test]
     fn term_rejects_logical_symbol_as_constant() {
-        assert!(term::new("/\\".to_string(), Some(0), vec![]).is_err());
+        assert!(term::new("\u{2227}".to_string(), Some(0), vec![]).is_err());
     }
 
     #[test]
@@ -275,7 +281,7 @@ mod tests {
         let f2 = Formula { formula_type: FormulaType::Term(t2), value: None };
 
         // Combine with /\ (conjunction)
-        let conj = logical_symbol::new("/\\".to_string()).unwrap();
+        let conj = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let combo = Formula {
             formula_type: FormulaType::Combination(conj, vec![f1, f2]),
             value: None,
@@ -304,10 +310,10 @@ mod tests {
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
         let c = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
 
-        let and = logical_symbol::new("/\\".to_string()).unwrap();
+        let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let a_and_b = Formula { formula_type: FormulaType::Combination(and, vec![a, b]), value: None };
 
-        let or = logical_symbol::new("\\/".to_string()).unwrap();
+        let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
         let result = Formula {
             formula_type: FormulaType::Combination(or, vec![a_and_b, c]),
             value: None,
@@ -377,7 +383,7 @@ mod tests {
             formula_type: FormulaType::Combination(not, vec![b]),
             value: None,
         };
-        let or = logical_symbol::new("\\/".to_string()).unwrap();
+        let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(or, vec![a, not_b]),
             value: None,
@@ -416,7 +422,7 @@ mod tests {
         // A /\ B where A is false and B is false; result should be false
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let and = logical_symbol::new("/\\".to_string()).unwrap();
+        let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
@@ -429,7 +435,7 @@ mod tests {
         // A \/ B where A is true and B is false; result should be true
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let or = logical_symbol::new("\\/".to_string()).unwrap();
+        let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(or, vec![a, b]),
             value: None,
@@ -442,7 +448,7 @@ mod tests {
         // A /\ B where A is true and B is true; result should be true
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let and = logical_symbol::new("/\\".to_string()).unwrap();
+        let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
@@ -455,7 +461,7 @@ mod tests {
         // A /\ B where A is true and B is false; result should be false
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let and = logical_symbol::new("/\\".to_string()).unwrap();
+        let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
@@ -524,7 +530,7 @@ mod tests {
         let f1 = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
         let f2 = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
         let f3 = Formula { formula_type: FormulaType::Term(term::new("R".to_string(), Some(0), vec![]).unwrap()), value: None };
-        let and = logical_symbol::new("/\\".to_string()).unwrap();
+        let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let antecedent = Formula {
             formula_type: FormulaType::Combination(and, vec![f1, f3]),
             value: None,
@@ -543,7 +549,7 @@ mod tests {
         let x = individual_variable::new("X").unwrap();
         let fx = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None };
         let fy = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None };
-        let and = logical_symbol::new("/\\".to_string()).unwrap();
+        let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let body = Formula { formula_type: FormulaType::Combination(and, vec![fx, fy]), value: None };
         let forall = logical_symbol::new("\u{2200}".to_string()).unwrap();
         let formula = Formula {
@@ -552,4 +558,5 @@ mod tests {
         };
         assert!(matches!(formula.formula_type, FormulaType::Quantifier(_, _, _)));
     }
+
 }

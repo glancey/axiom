@@ -63,7 +63,16 @@ name = "axiom"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axiom_parser",
  "clap",
+ "formalisms",
+]
+
+[[package]]
+name = "axiom_parser"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "formalisms",
 ]
 
