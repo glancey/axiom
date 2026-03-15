@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashMap;
 
 /// A variable ranging over individuals in the domain.
 /// Must be a single uppercase letter (A–Z), optionally followed by one or more apostrophes.
@@ -192,6 +193,85 @@ impl Formula {
     /// - Atomic formulas (`Term`, `Relation`): returns `self.value.unwrap_or(false)`.
     /// - `Combination`: evaluates structurally by the connective, recursing with `context`.
     /// - `Quantifier`: delegates to the body formula.
+    /// Collect all unique variable names appearing in this formula.
+    pub fn collect_variables(&self) -> Vec<String> {
+        let mut vars = Vec::new();
+        self.collect_variables_into(&mut vars);
+        vars.sort();
+        vars.dedup();
+        vars
+    }
+
+    fn collect_variables_into(&self, vars: &mut Vec<String>) {
+        match &self.formula_type {
+            FormulaType::Term(t) => {
+                if let TermType::Variable(v) = &t.term_type {
+                    vars.push(v.name.clone());
+                }
+            }
+            FormulaType::Relation(_, terms) => {
+                for t in terms {
+                    if let TermType::Variable(v) = &t.term_type {
+                        vars.push(v.name.clone());
+                    }
+                }
+            }
+            FormulaType::Combination(_, formulas) => {
+                for f in formulas {
+                    f.collect_variables_into(vars);
+                }
+            }
+            FormulaType::Quantifier(_, v, body) => {
+                vars.push(v.name.clone());
+                body.collect_variables_into(vars);
+            }
+        }
+    }
+
+    /// Evaluate the formula under a specific variable assignment.
+    pub fn evaluate(&self, assignment: &HashMap<String, bool>) -> bool {
+        match &self.formula_type {
+            FormulaType::Term(t) => match &t.term_type {
+                TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
+                _ => self.value.unwrap_or(false),
+            },
+            FormulaType::Relation(_, _) => self.value.unwrap_or(false),
+            FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
+                "\u{2227}" => formulas.iter().all(|f| f.evaluate(assignment)),
+                "\u{2228}" => formulas.iter().any(|f| f.evaluate(assignment)),
+                "\u{007E}" => formulas.first().map_or(false, |f| !f.evaluate(assignment)),
+                "=>" => {
+                    formulas.len() != 2
+                        || !formulas[0].evaluate(assignment)
+                        || formulas[1].evaluate(assignment)
+                }
+                "<=>" => {
+                    formulas.len() == 2
+                        && formulas[0].evaluate(assignment) == formulas[1].evaluate(assignment)
+                }
+                _ => false,
+            },
+            FormulaType::Quantifier(_, _, body) => body.evaluate(assignment),
+        }
+    }
+
+    /// Return true if the formula holds under every possible truth assignment of its variables.
+    pub fn is_tautology(&self) -> bool {
+        let vars = self.collect_variables();
+        let n = vars.len();
+        for mask in 0u64..(1u64 << n) {
+            let assignment: HashMap<String, bool> = vars
+                .iter()
+                .enumerate()
+                .map(|(i, name)| (name.clone(), (mask >> i) & 1 == 1))
+                .collect();
+            if !self.evaluate(&assignment) {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn is_true(&self, context: &[Formula]) -> bool {
         match &self.formula_type {
             FormulaType::Term(_) | FormulaType::Relation(_, _) => {

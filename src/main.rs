@@ -41,9 +41,14 @@ enum Commands {
     },
     /// Print descriptions of all language constructs
     Glossary,
-    /// Check if a term is a valid formula and evaluate is_true
+    /// Check if a term is a valid formula 
     CheckFormula {
         /// Term to build the formula from
+        value: String,
+    },
+    /// Parse a formula and return Ok if it is a tautology (is_true with empty context)
+    TautologicalProof {
+        /// Formula to evaluate
         value: String,
     },
 }
@@ -113,6 +118,19 @@ fn main() -> Result<()> {
             match parse_formula(&value) {
                 Ok(ft) => println!("Valid formula: {value}\n{ft:#?}"),
                 Err(e) => println!("Invalid formula: {e}"),
+            }
+        }
+        Commands::TautologicalProof { value } => {
+            match parse_formula(&value) {
+                Err(e) => println!("Invalid formula: {e}"),
+                Ok(ft) => {
+                    let formula = Formula { formula_type: ft, value: None };
+                    if formula.is_tautology() {
+                        println!("Tautology: {value}");
+                    } else {
+                        println!("Not a tautology: {value}");
+                    }
+                }
             }
         }
         Commands::Glossary => {
@@ -207,5 +225,36 @@ mod tests {
     #[test]
     fn check_formula_p_implies_q() {
         assert_eq!(check_formula("P=>Q"), "Valid formula: P=>Q");
+    }
+
+    fn tautological_proof(value: &str) -> String {
+        match parse_formula(value) {
+            Err(e) => format!("Invalid formula: {e}"),
+            Ok(ft) => {
+                let formula = Formula { formula_type: ft, value: None };
+                if formula.is_tautology() {
+                    format!("Tautology: {value}")
+                } else {
+                    format!("Not a tautology: {value}")
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tautological_proof_invalid_formula() {
+        assert!(tautological_proof("123").starts_with("Invalid formula:"));
+    }
+
+    #[test]
+    fn tautological_proof_p_implies_q_is_not_tautology() {
+        // P=>Q is false when P=true, Q=false
+        assert_eq!(tautological_proof("P=>Q"), "Not a tautology: P=>Q");
+    }
+
+    #[test]
+    fn tautological_proof_p_implies_p_is_tautology() {
+        // P=>P is true under every assignment
+        assert_eq!(tautological_proof("P=>P"), "Tautology: P=>P");
     }
 }
