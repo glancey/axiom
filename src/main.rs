@@ -111,7 +111,7 @@ fn main() -> Result<()> {
         }
         Commands::CheckFormula { value } => {
             match parse_formula(&value) {
-                Ok(_) => println!("Valid formula: {value}"),
+                Ok(ft) => println!("Valid formula: {value}\n{ft:#?}"),
                 Err(e) => println!("Invalid formula: {e}"),
             }
         }

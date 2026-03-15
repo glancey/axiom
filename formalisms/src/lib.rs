@@ -4,7 +4,10 @@ use anyhow::Result;
 /// Must be a single uppercase letter (A–Z), optionally followed by one or more apostrophes.
 /// Examples: `A`, `B'`, `X'''`
 #[allow(non_camel_case_types)]
-pub struct individual_variable;
+#[derive(Debug)]
+pub struct individual_variable {
+    pub name: String,
+}
 
 impl individual_variable {
     pub fn new(s: &str) -> Result<Self> {
@@ -22,7 +25,7 @@ impl individual_variable {
         if chars.next().is_some() {
             anyhow::bail!("individual_variable may only contain A-Z letters optionally followed by apostrophes");
         }
-        Ok(individual_variable)
+        Ok(individual_variable { name: s.to_string() })
     }
 }
 
@@ -30,6 +33,7 @@ impl individual_variable {
 /// `/\` (and), `\/` (or), `=>` (implies), `~` (not), `<=>` (iff),
 /// `∀` (for all), `Ǝ` (there exists), `==` (equals), `(`, `)`
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct logical_symbol(String);
 
 impl logical_symbol {
@@ -52,6 +56,7 @@ impl logical_symbol {
 /// Example: In mathematical terms, an operation, O, of rank 10, would be 
 /// represented as O(a0, a1, a2,... a9).
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct operation_symbol {
     pub symbol: String,
     pub rank: u32,
@@ -71,6 +76,7 @@ impl operation_symbol {
 
 /// A zero-arity `operation_symbol` (rank 0) naming a fixed individual in the domain.
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct individual_constant(pub operation_symbol);
 
 impl individual_constant {
@@ -80,9 +86,10 @@ impl individual_constant {
 }
 
 /// An `operation_symbol` of rank 1–5 used to denote a relation between individuals.
-/// Example: In mathematical terms, a Relation, R, of rank 4, would be 
+/// Example: In mathematical terms, a Relation, R, of rank 4, would be
 /// represented as R(a0, a1, a2, a3, a4).
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct relation_symbol(pub operation_symbol);
 
 impl relation_symbol {
@@ -99,6 +106,7 @@ impl relation_symbol {
 /// Example: In logical terms, an operation of rank m is some process applied to all
 /// the members of an array of size m.
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct operation {
     pub symbol: operation_symbol,
     pub vars: Vec<term>,
@@ -117,6 +125,7 @@ impl operation {
 }
 
 /// Discriminates the three forms a `term` may take.
+#[derive(Debug)]
 pub enum TermType {
     /// An `individual_variable`.
     Variable(individual_variable),
@@ -129,6 +138,7 @@ pub enum TermType {
 /// A term in the language: either an individual variable, an individual constant,
 /// or an operation symbol of rank m > 0 applied to m sub-terms.
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct term {
     pub term_type: TermType,
 }
@@ -155,6 +165,7 @@ impl term {
 }
 
 /// Discriminates the four forms a formula may take.
+#[derive(Debug)]
 pub enum FormulaType {
     /// An atomic formula consisting of a single term.
     Term(term),
@@ -169,6 +180,7 @@ pub enum FormulaType {
 }
 
 /// A well-formed formula (wff) of the language.
+#[derive(Debug)]
 pub struct Formula {
     pub formula_type: FormulaType,
     pub value: Option<bool>,
