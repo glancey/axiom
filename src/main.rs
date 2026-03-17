@@ -146,9 +146,26 @@ fn main() -> Result<()> {
             }
         }
         Commands::CheckFormula { value } => {
-            match parse_formula(&value) {
-                Ok(ft) => println!("Valid formula: {value}\n{ft:#?}"),
-                Err(e) => println!("Invalid formula: {e}"),
+            let is_symbol_application = value
+                .chars().next().map_or(false, |c| c.is_ascii_lowercase())
+                && value.contains('(');
+            if is_symbol_application {
+                let formula_str = if let Ok((sym, args)) = parse_relation_symbol(&value) {
+                    format!("{}({})", sym.0.symbol, args.join(", "))
+                } else if let Ok((sym, args)) = parse_operation_symbol(&value) {
+                    format!("{}({})", sym.symbol, args.join(", "))
+                } else {
+                    value.clone()
+                };
+                match parse_formula(&formula_str) {
+                    Ok(ft) => println!("Valid formula: {formula_str}\n{ft:#?}"),
+                    Err(e) => println!("Invalid formula: {e}"),
+                }
+            } else {
+                match parse_formula(&value) {
+                    Ok(ft) => println!("Valid formula: {value}\n{ft:#?}"),
+                    Err(e) => println!("Invalid formula: {e}"),
+                }
             }
         }
         Commands::TautologicalProof { value } => {
@@ -344,9 +361,61 @@ mod tests {
         }
     }
 
+    fn check_formula_symbol(value: &str) -> String {
+        let is_symbol_application = value
+            .chars().next().map_or(false, |c| c.is_ascii_lowercase())
+            && value.contains('(');
+        if is_symbol_application {
+            if let Ok((sym, args)) = parse_relation_symbol(value) {
+                return format!("relation_symbol({}, rank={}), args: {:?}", sym.0.symbol, sym.0.rank, args);
+            }
+            if let Ok((sym, args)) = parse_operation_symbol(value) {
+                return format!("operation_symbol({}, rank={}), args: {:?}", sym.symbol, sym.rank, args);
+            }
+        }
+        check_formula(value)
+    }
+
     #[test]
     fn check_formula_p_implies_q() {
         assert_eq!(check_formula("P=>Q"), "Valid formula: P=>Q");
+    }
+
+    #[test]
+    fn check_formula_relation_symbol_rank_1() {
+        assert_eq!(
+            check_formula_symbol("rel(a)"),
+            "relation_symbol(rel, rank=1), args: [\"a\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_relation_symbol_rank_3() {
+        assert_eq!(
+            check_formula_symbol("rel(a1, a2, a3)"),
+            "relation_symbol(rel, rank=3), args: [\"a1\", \"a2\", \"a3\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_operation_symbol_rank_6() {
+        assert_eq!(
+            check_formula_symbol("op(a1, a2, a3, a4, a5, a6)"),
+            "operation_symbol(op, rank=6), args: [\"a1\", \"a2\", \"a3\", \"a4\", \"a5\", \"a6\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_operation_symbol_rank_1() {
+        assert_eq!(
+            check_formula_symbol("op(a)"),
+            "relation_symbol(op, rank=1), args: [\"a\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_no_parens_falls_back_to_formula() {
+        assert_eq!(check_formula_symbol("P=>Q"), "Valid formula: P=>Q");
     }
 
     fn tautological_proof(value: &str) -> String {
