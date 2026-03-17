@@ -10,7 +10,7 @@ use formalisms::{
 /// ```text
 /// formula  := quantifier | negation | combination | atomic
 /// quantifier := ('∀' | 'Ǝ') variable '.' formula
-/// negation   := '~' formula
+/// negation   := '\u{00AC}' formula
 /// combination := '(' formula ('∧'|'∨'|'/\'|'\/'|'=>'|'<=>'|'==') formula ')'
 /// atomic     := variable | relation | constant
 /// relation   := name '(' term (',' term)* ')'
@@ -26,11 +26,11 @@ pub fn parse_formula(s: &str) -> Result<FormulaType> {
     let s = s.replace("there exists", "\u{018E}");
     let s = s.replace(" and ", " \u{2227} ");
     let s = s.replace(" or ", " \u{2228} ");
-    let s = s.replace(" -", " ~");
+    let s = s.replace(" not ", "\u{00AC}");
     let s = s.trim().to_string();
     let s = s.as_str();
     let normalized = if s.starts_with('(')
-        || s.starts_with('~')
+        || s.starts_with('\u{00AC}')
         || s.starts_with('\u{2200}')
         || s.starts_with('\u{018E}')
     {
@@ -47,8 +47,11 @@ pub fn parse_formula(s: &str) -> Result<FormulaType> {
     Ok(ft)
 }
 
+/// Recursive-descent parser that consumes a formula string character by character.
 struct Parser {
+    /// The full input string being parsed.
     input: String,
+    /// Current byte offset into `input`.
     pos: usize,
 }
 
@@ -57,16 +60,20 @@ impl Parser {
         Parser { input: input.to_string(), pos: 0 }
     }
 
+    /// Returns the unparsed remainder of the input.
     fn rest(&self) -> &str {
         &self.input[self.pos..]
     }
 
+    /// Advances `pos` past any leading whitespace.
     fn skip_ws(&mut self) {
         while let Some(c) = self.rest().chars().next() {
             if c.is_whitespace() { self.pos += c.len_utf8(); } else { break; }
         }
     }
 
+    /// Skips whitespace then expects and consumes the literal string `s`, returning an
+    /// error if it is not present.
     fn consume(&mut self, s: &str) -> Result<()> {
         self.skip_ws();
         if self.rest().starts_with(s) {
@@ -77,14 +84,16 @@ impl Parser {
         }
     }
 
+    /// Dispatches to the appropriate sub-parser based on the next character:
+    /// `∀`/`Ǝ` → quantifier, `¬` → negation, `(` → combination, otherwise → atomic.
     fn formula(&mut self) -> Result<FormulaType> {
         self.skip_ws();
         if self.rest().starts_with('\u{2200}') || self.rest().starts_with('\u{018E}') {
             return self.quantifier();
         }
-        if self.rest().starts_with('~') {
-            self.pos += 1;
-            let sym = logical_symbol::new("~".to_string())?;
+        if self.rest().starts_with('\u{00AC}') {
+            self.pos += '\u{00AC}'.len_utf8();
+            let sym = logical_symbol::new("\u{00AC}".to_string())?;
             let body = Formula { formula_type: self.formula()?, value: None };
             return Ok(FormulaType::Combination(sym, vec![body]));
         }
@@ -94,6 +103,7 @@ impl Parser {
         self.atomic()
     }
 
+    /// Parses a quantified formula: `(∀ | Ǝ) variable . formula`.
     fn quantifier(&mut self) -> Result<FormulaType> {
         let q = if self.rest().starts_with('\u{2200}') {
             self.pos += '\u{2200}'.len_utf8(); "\u{2200}"
@@ -107,6 +117,8 @@ impl Parser {
         Ok(FormulaType::Quantifier(sym, var, Box::new(body)))
     }
 
+    /// Parses a parenthesised formula: `( formula )` or `( formula connective formula )`.
+    /// A single formula in parentheses with no connective is unwrapped transparently.
     fn combination(&mut self) -> Result<FormulaType> {
         self.consume("(")?;
         let lhs = self.formula()?;
@@ -125,6 +137,7 @@ impl Parser {
         ]))
     }
 
+    /// Reads one of the recognised binary connectives (`<=>`, `=>`, `∧`, `∨`, `==`).
     fn binary_connective(&mut self) -> Result<String> {
         self.skip_ws();
         for op in &["<=>", "=>", "\u{2227}", "\u{2228}", "=="] {
@@ -136,6 +149,12 @@ impl Parser {
         anyhow::bail!("expected connective at position {}", self.pos)
     }
 
+    /// Parses an atomic formula: an individual variable, a relation application
+    /// `name(term, ...)`, or an individual constant.
+    ///
+    /// Variables are distinguished from relation/constant names by beginning with an
+    /// uppercase ASCII letter.  A trailing `(` after a variable-like token signals that
+    /// it is actually a relation name, so the position is reset and the name is re-parsed.
     fn atomic(&mut self) -> Result<FormulaType> {
         self.skip_ws();
         let start = self.pos;
@@ -166,6 +185,7 @@ impl Parser {
         }
     }
 
+    /// Parses a comma-separated list of terms, stopping before a closing `)`.
     fn term_list(&mut self) -> Result<Vec<term>> {
         let mut terms = Vec::new();
         loop {
@@ -178,6 +198,8 @@ impl Parser {
         Ok(terms)
     }
 
+    /// Parses a single term: a variable (`[A-Z]'*`), an operation `name(term, ...)`,
+    /// or a constant (`name`).
     fn term(&mut self) -> Result<term> {
         self.skip_ws();
         let start = self.pos;
@@ -209,6 +231,8 @@ impl Parser {
         }
     }
 
+    /// Parses an individual variable token: an uppercase ASCII letter followed by zero
+    /// or more prime (`'`) characters.
     fn individual_variable(&mut self) -> Result<individual_variable> {
         self.skip_ws();
         let start = self.pos;
@@ -222,6 +246,8 @@ impl Parser {
         }
     }
 
+    /// Parses a name token: a lowercase ASCII letter followed by zero or more
+    /// alphanumeric characters or underscores.
     fn name(&mut self) -> Result<String> {
         self.skip_ws();
         let start = self.pos;
@@ -263,7 +289,7 @@ mod tests {
 
     #[test]
     fn parse_formula_negation() {
-        assert!(matches!(parse_formula("~A"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("¬A"), Ok(FormulaType::Combination(_, _))));
     }
 
     #[test]
@@ -282,7 +308,7 @@ mod tests {
 
     #[test]
     fn parse_formula_nested() {
-        assert!(matches!(parse_formula("(~A => B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(¬A => B)"), Ok(FormulaType::Combination(_, _))));
         assert!(matches!(parse_formula("∀X.(A ∧ B)"), Ok(FormulaType::Quantifier(_, _, _))));
     }
 

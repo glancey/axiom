@@ -2,20 +2,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use formalisms::{
     individual_variable, logical_symbol, operation_symbol, individual_constant,
-    relation_symbol, operation, term, Formula,
+    relation_symbol, term, Formula,
 };
 use axiom_parser::parse_formula;
 
-enum LanguageConstruct {
-    IndividualVariable(individual_variable),
-    LogicalSymbol(logical_symbol),
-    OperationSymbol(operation_symbol),
-    IndividualConstant(individual_constant),
-    RelationSymbol(relation_symbol),
-    Operation(operation),
-    Term(term),
-    Formula(Formula),
-}
 
 #[derive(Parser)]
 #[command(name = "axiom")]
@@ -38,16 +28,97 @@ enum Commands {
     Validate {
         /// String to validate
         value: String,
+        /// Optional array of arguments (required for operation_symbol; its length sets the rank)
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
     },
     /// Print descriptions of all language constructs
     Glossary,
-    /// Check if a term is a valid formula and evaluate is_true
+    /// Check if a term is a valid formula 
     CheckFormula {
         /// Term to build the formula from
         value: String,
     },
+    /// Parse a formula and return Ok if it is a tautology (is_true with empty context)
+    TautologicalProof {
+        /// Formula to evaluate
+        value: String,
+    },
 }
 
+
+/// Parses a string of the form `O(a1, a2, ..., an)` into an [`operation_symbol`] of rank n
+/// and the corresponding `Vec<String>` of argument names.
+///
+/// Returns an error if the string is not well-formed, the argument list is empty,
+/// or the symbol name is invalid.
+/// Normalizes natural-language negation into `¬` before parsing:
+/// - `not(expr)` → `¬(expr)`
+/// - `notX` where X is an uppercase ASCII letter → `¬X`
+fn normalize_formula(s: &str) -> String {
+    let mut result = String::new();
+    let mut i = 0;
+    while i < s.len() {
+        if s[i..].starts_with("not(") {
+            result.push('\u{00AC}');
+            result.push('(');
+            i += 4;
+        } else if s[i..].starts_with("not") {
+            let after = s[i + 3..].chars().next();
+            if after.map_or(false, |c| c.is_ascii_uppercase()) {
+                result.push('\u{00AC}');
+                i += 3;
+            } else {
+                let c = s[i..].chars().next().unwrap();
+                result.push(c);
+                i += c.len_utf8();
+            }
+        } else {
+            let c = s[i..].chars().next().unwrap();
+            result.push(c);
+            i += c.len_utf8();
+        }
+    }
+    result
+}
+
+fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
+    let s = s.trim();
+    let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in operation symbol"))?;
+    let name = s[..paren].trim().to_string();
+    let rest = s[paren + 1..].trim();
+    let rest = rest.strip_suffix(')').ok_or_else(|| anyhow::anyhow!("expected ')' at end of operation symbol"))?;
+    let args: Vec<String> = rest.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+    if args.is_empty() {
+        anyhow::bail!("operation_symbol requires at least one argument");
+    }
+    let rank = args.len() as u32;
+    let sym = operation_symbol::new(name, rank)?;
+    Ok((sym, args))
+}
+
+/// Parses a string of the form `re(a1, a2, ..., an)` into a [`relation_symbol`] of rank n
+/// and the corresponding `Vec<String>` of argument names.
+///
+/// Returns an error if the string is not well-formed, the argument list is empty,
+/// n is not in the range 1–5, or the symbol name is invalid.
+fn parse_relation_symbol(s: &str) -> Result<(relation_symbol, Vec<String>)> {
+    let s = s.trim();
+    let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in relation symbol"))?;
+    let name = s[..paren].trim().to_string();
+    let rest = s[paren + 1..].trim();
+    let rest = rest.strip_suffix(')').ok_or_else(|| anyhow::anyhow!("expected ')' at end of relation symbol"))?;
+    let args: Vec<String> = rest.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+    if args.is_empty() {
+        anyhow::bail!("relation_symbol requires at least one argument");
+    }
+    let rank = args.len() as u32;
+    if rank > 5 {
+        anyhow::bail!("relation_symbol rank must be 1–5, got {rank}");
+    }
+    let sym = relation_symbol::new(name, rank)?;
+    Ok((sym, args))
+}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -59,7 +130,7 @@ fn main() -> Result<()> {
                 Err(_) => println!("Name cannot be empty."),
             }
         }
-        Commands::Validate { value } => {
+        Commands::Validate { value, args } => {
             println!("Select type to validate against:");
             println!("  1. individual_variable");
             println!("  2. logical_symbol");
@@ -71,48 +142,74 @@ fn main() -> Result<()> {
             let mut input = String::new();
             std::io::stdin().read_line(&mut input)?;
 
-            let result: Result<LanguageConstruct> = match input.trim() {
-                "1" => individual_variable::new(&value).map(LanguageConstruct::IndividualVariable),
-                "2" => logical_symbol::new(value.clone()).map(LanguageConstruct::LogicalSymbol),
+            let result: Result<String> = match input.trim() {
+                "1" => individual_variable::new(&value).map(|_| format!("individual_variable({value})")),
+                "2" => logical_symbol::new(value.clone()).map(|_| format!("logical_symbol({value})")),
                 "3" => {
-                    print!("Enter rank: ");
-                    let mut rank_input = String::new();
-                    std::io::stdin().read_line(&mut rank_input)?;
-                    let rank: u32 = rank_input.trim().parse()?;
-                    operation_symbol::new(value.clone(), rank).map(LanguageConstruct::OperationSymbol)
+                    if value.contains('(') {
+                        parse_operation_symbol(&value).map(|(sym, _)| format!("operation_symbol({}, rank={})", sym.symbol, sym.rank))
+                    } else if args.is_empty() {
+                        anyhow::bail!("operation_symbol requires at least one argument");
+                    } else {
+                        let rank = args.len() as u32;
+                        operation_symbol::new(value.clone(), rank).map(|_| format!("operation_symbol({value}, rank={rank})"))
+                    }
                 }
-                "4" => individual_constant::new(value.clone()).map(LanguageConstruct::IndividualConstant),
+                "4" => individual_constant::new(value.clone()).map(|_| format!("individual_constant({value})")),
                 "5" => {
-                    print!("Enter rank (1–5): ");
-                    let mut rank_input = String::new();
-                    std::io::stdin().read_line(&mut rank_input)?;
-                    let rank: u32 = rank_input.trim().parse()?;
-                    relation_symbol::new(value.clone(), rank).map(LanguageConstruct::RelationSymbol)
+                    if value.contains('(') {
+                        parse_relation_symbol(&value).map(|(sym, _)| format!("relation_symbol({}, rank={})", sym.0.symbol, sym.0.rank))
+                    } else if args.is_empty() {
+                        anyhow::bail!("relation_symbol requires at least one argument");
+                    } else {
+                        let rank = args.len() as u32;
+                        relation_symbol::new(value.clone(), rank).map(|_| format!("relation_symbol({value}, rank={rank})"))
+                    }
                 }
-                "6" => term::new(value.clone(), None, vec![]).map(LanguageConstruct::Term),
+                "6" => term::new(value.clone(), None, vec![]).map(|_| format!("term({value})")),
                 _ => anyhow::bail!("invalid selection"),
             };
 
             match result {
-                Ok(construct) => {
-                    let name = match &construct {
-                        LanguageConstruct::IndividualVariable(_) => "individual_variable",
-                        LanguageConstruct::LogicalSymbol(_) => "logical_symbol",
-                        LanguageConstruct::OperationSymbol(_) => "operation_symbol",
-                        LanguageConstruct::IndividualConstant(_) => "individual_constant",
-                        LanguageConstruct::RelationSymbol(_) => "relation_symbol",
-                        LanguageConstruct::Term(_) => "term",
-                        _ => unreachable!(),
-                    };
-                    println!("{name}({value})");
-                }
+                Ok(output) => println!("{output}"),
                 Err(e) => println!("Error: {e}"),
             }
         }
         Commands::CheckFormula { value } => {
-            match parse_formula(&value) {
-                Ok(_) => println!("Valid formula: {value}"),
+            let normalized = normalize_formula(&value);
+            let is_symbol_application = normalized
+                .chars().next().map_or(false, |c| c.is_ascii_lowercase())
+                && normalized.contains('(');
+            let formula_str = if is_symbol_application {
+                if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
+                    format!("{}({})", sym.0.symbol, args.join(", "))
+                } else if let Ok((sym, args)) = parse_operation_symbol(&normalized) {
+                    format!("{}({})", sym.symbol, args.join(", "))
+                } else {
+                    normalized
+                }
+            } else {
+                normalized
+            };
+            let parse_str = if !formula_str.starts_with('(') { format!("({formula_str})") } else { formula_str.clone() };
+            match parse_formula(&parse_str) {
+                Ok(ft) => println!("Valid formula: {formula_str}\n{ft:#?}"),
                 Err(e) => println!("Invalid formula: {e}"),
+            }
+        }
+        Commands::TautologicalProof { value } => {
+            let normalized = normalize_formula(&value);
+            let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
+            match parse_formula(&parse_str) {
+                Err(e) => println!("Invalid formula: {e}"),
+                Ok(ft) => {
+                    let formula = Formula { formula_type: ft, value: None };
+                    if formula.is_tautology() {
+                        println!("Tautology: {value}");
+                    } else {
+                        println!("Not a tautology: {value}");
+                    }
+                }
             }
         }
         Commands::Glossary => {
@@ -123,7 +220,7 @@ fn main() -> Result<()> {
             println!();
             println!("logical_symbol");
             println!("  One of the fixed logical connectives and punctuation symbols of the language:");
-            println!("  ∧ (and), ∨ (or), => (implies), ~ (not), <=> (iff),");
+            println!("  ∧ (and), ∨ (or), => (implies), ¬ (not), <=> (iff),");
             println!("  ∀ (for all), Ǝ (there exists), == (equals), (, )");
             println!();
             println!("operation_symbol");
@@ -165,6 +262,24 @@ mod tests {
         }
     }
 
+    fn validate_operation_symbol(value: &str, args: &[&str]) -> String {
+        if args.is_empty() {
+            return "Error: operation_symbol requires at least one argument".to_string();
+        }
+        let rank = args.len() as u32;
+        match operation_symbol::new(value.to_string(), rank) {
+            Ok(_) => format!("operation_symbol({value}, rank={rank})"),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    fn validate_operation_symbol_from_str(s: &str) -> String {
+        match parse_operation_symbol(s) {
+            Ok((sym, _)) => format!("operation_symbol({}, rank={})", sym.symbol, sym.rank),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
     #[test]
     fn validate_single_uppercase_letter() {
         assert_eq!(validate("A"), "individual_variable(A)");
@@ -192,6 +307,79 @@ mod tests {
     }
 
     #[test]
+    fn validate_operation_symbol_rank_from_args() {
+        assert_eq!(validate_operation_symbol("f", &["x"]), "operation_symbol(f, rank=1)");
+        assert_eq!(validate_operation_symbol("f", &["x", "y", "z"]), "operation_symbol(f, rank=3)");
+    }
+
+    #[test]
+    fn validate_operation_symbol_empty_args_is_error() {
+        assert!(validate_operation_symbol("f", &[]).starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_operation_symbol_zero_rank() {
+        assert_eq!(validate_operation_symbol("f", &[]), "Error: operation_symbol requires at least one argument");
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_rank_1() {
+        assert_eq!(validate_operation_symbol_from_str("f(a)"), "operation_symbol(f, rank=1)");
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_rank_3() {
+        assert_eq!(validate_operation_symbol_from_str("op(a1, a2, a3)"), "operation_symbol(op, rank=3)");
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_empty_args_is_error() {
+        assert!(validate_operation_symbol_from_str("f()").starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_missing_paren_is_error() {
+        assert!(validate_operation_symbol_from_str("f").starts_with("Error:"));
+    }
+
+    fn validate_relation_symbol_from_str(s: &str) -> String {
+        match parse_relation_symbol(s) {
+            Ok((sym, _)) => format!("relation_symbol({}, rank={})", sym.0.symbol, sym.0.rank),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_1() {
+        assert_eq!(validate_relation_symbol_from_str("rel(a)"), "relation_symbol(rel, rank=1)");
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_3() {
+        assert_eq!(validate_relation_symbol_from_str("rel(a1, a2, a3)"), "relation_symbol(rel, rank=3)");
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_5() {
+        assert_eq!(validate_relation_symbol_from_str("rel(a1, a2, a3, a4, a5)"), "relation_symbol(rel, rank=5)");
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_empty_args_is_error() {
+        assert!(validate_relation_symbol_from_str("rel()").starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_6_is_error() {
+        assert!(validate_relation_symbol_from_str("rel(a1, a2, a3, a4, a5, a6)").starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_missing_paren_is_error() {
+        assert!(validate_relation_symbol_from_str("rel").starts_with("Error:"));
+    }
+
+    #[test]
     fn check_formula_implication() {
         assert!(parse_formula("P=>Q").is_ok());
         assert!(parse_formula("(P=>Q)").is_ok());
@@ -204,8 +392,111 @@ mod tests {
         }
     }
 
+    fn check_formula_symbol(value: &str) -> String {
+        let normalized = normalize_formula(value);
+        let is_symbol_application = normalized
+            .chars().next().map_or(false, |c| c.is_ascii_lowercase())
+            && normalized.contains('(');
+        if is_symbol_application {
+            if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
+                return format!("relation_symbol({}, rank={}), args: {:?}", sym.0.symbol, sym.0.rank, args);
+            }
+            if let Ok((sym, args)) = parse_operation_symbol(&normalized) {
+                return format!("operation_symbol({}, rank={}), args: {:?}", sym.symbol, sym.rank, args);
+            }
+        }
+        let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
+        match parse_formula(&parse_str) {
+            Ok(_) => format!("Valid formula: {normalized}"),
+            Err(e) => format!("Invalid formula: {e}"),
+        }
+    }
+
     #[test]
     fn check_formula_p_implies_q() {
         assert_eq!(check_formula("P=>Q"), "Valid formula: P=>Q");
+    }
+
+    #[test]
+    fn check_formula_relation_symbol_rank_1() {
+        assert_eq!(
+            check_formula_symbol("rel(a)"),
+            "relation_symbol(rel, rank=1), args: [\"a\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_relation_symbol_rank_3() {
+        assert_eq!(
+            check_formula_symbol("rel(a1, a2, a3)"),
+            "relation_symbol(rel, rank=3), args: [\"a1\", \"a2\", \"a3\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_operation_symbol_rank_6() {
+        assert_eq!(
+            check_formula_symbol("op(a1, a2, a3, a4, a5, a6)"),
+            "operation_symbol(op, rank=6), args: [\"a1\", \"a2\", \"a3\", \"a4\", \"a5\", \"a6\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_operation_symbol_rank_1() {
+        assert_eq!(
+            check_formula_symbol("op(a)"),
+            "relation_symbol(op, rank=1), args: [\"a\"]"
+        );
+    }
+
+    #[test]
+    fn check_formula_no_parens_falls_back_to_formula() {
+        assert_eq!(check_formula_symbol("P=>Q"), "Valid formula: P=>Q");
+    }
+
+    #[test]
+    fn check_formula_not_variable() {
+        assert_eq!(check_formula_symbol("not(A)"), "Valid formula: \u{00AC}(A)");
+    }
+
+    #[test]
+    fn check_formula_not_implication() {
+        assert_eq!(check_formula_symbol("not(A => B)"), "Valid formula: \u{00AC}(A => B)");
+    }
+
+    #[test]
+    fn check_formula_not_conjunction() {
+        assert_eq!(check_formula_symbol("not(A ∧ B)"), "Valid formula: \u{00AC}(A ∧ B)");
+    }
+
+    fn tautological_proof(value: &str) -> String {
+        match parse_formula(value) {
+            Err(e) => format!("Invalid formula: {e}"),
+            Ok(ft) => {
+                let formula = Formula { formula_type: ft, value: None };
+                if formula.is_tautology() {
+                    format!("Tautology: {value}")
+                } else {
+                    format!("Not a tautology: {value}")
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tautological_proof_invalid_formula() {
+        assert!(tautological_proof("123").starts_with("Invalid formula:"));
+    }
+
+    #[test]
+    fn tautological_proof_p_implies_q_is_not_tautology() {
+        // P=>Q is false when P=true, Q=false
+        assert_eq!(tautological_proof("P=>Q"), "Not a tautology: P=>Q");
+    }
+
+    #[test]
+    fn tautological_proof_p_implies_p_is_tautology() {
+        // P=>P is true under every assignment
+        assert_eq!(tautological_proof("P=>P"), "Tautology: P=>P");
     }
 }

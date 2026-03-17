@@ -1,10 +1,14 @@
 use anyhow::Result;
+use std::collections::HashMap;
 
 /// A variable ranging over individuals in the domain.
 /// Must be a single uppercase letter (A–Z), optionally followed by one or more apostrophes.
 /// Examples: `A`, `B'`, `X'''`
 #[allow(non_camel_case_types)]
-pub struct individual_variable;
+#[derive(Debug)]
+pub struct individual_variable {
+    pub name: String,
+}
 
 impl individual_variable {
     pub fn new(s: &str) -> Result<Self> {
@@ -22,20 +26,21 @@ impl individual_variable {
         if chars.next().is_some() {
             anyhow::bail!("individual_variable may only contain A-Z letters optionally followed by apostrophes");
         }
-        Ok(individual_variable)
+        Ok(individual_variable { name: s.to_string() })
     }
 }
 
 /// One of the fixed logical connectives and punctuation symbols of the language:
-/// `/\` (and), `\/` (or), `=>` (implies), `~` (not), `<=>` (iff),
+/// `/\` (and), `\/` (or), `=>` (implies), `¬` (not), `<=>` (iff),
 /// `∀` (for all), `Ǝ` (there exists), `==` (equals), `(`, `)`
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct logical_symbol(String);
 
 impl logical_symbol {
     pub fn new(s: String) -> Result<Self> {
         const VALID: &[&str] = &[
-            "\u{2227}", "\u{2228}", "=>", "\u{007E}", "<=>",
+            "\u{2227}", "\u{2228}", "=>", "\u{00AC}", "<=>",
             "\u{2200}", "\u{018E}", "==", "(", ")",
         ];
         if VALID.contains(&s.as_str()) {
@@ -52,6 +57,7 @@ impl logical_symbol {
 /// Example: In mathematical terms, an operation, O, of rank 10, would be 
 /// represented as O(a0, a1, a2,... a9).
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct operation_symbol {
     pub symbol: String,
     pub rank: u32,
@@ -71,6 +77,7 @@ impl operation_symbol {
 
 /// A zero-arity `operation_symbol` (rank 0) naming a fixed individual in the domain.
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct individual_constant(pub operation_symbol);
 
 impl individual_constant {
@@ -80,9 +87,10 @@ impl individual_constant {
 }
 
 /// An `operation_symbol` of rank 1–5 used to denote a relation between individuals.
-/// Example: In mathematical terms, a Relation, R, of rank 4, would be 
+/// Example: In mathematical terms, a Relation, R, of rank 4, would be
 /// represented as R(a0, a1, a2, a3, a4).
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct relation_symbol(pub operation_symbol);
 
 impl relation_symbol {
@@ -99,6 +107,7 @@ impl relation_symbol {
 /// Example: In logical terms, an operation of rank m is some process applied to all
 /// the members of an array of size m.
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct operation {
     pub symbol: operation_symbol,
     pub vars: Vec<term>,
@@ -117,6 +126,7 @@ impl operation {
 }
 
 /// Discriminates the three forms a `term` may take.
+#[derive(Debug)]
 pub enum TermType {
     /// An `individual_variable`.
     Variable(individual_variable),
@@ -129,6 +139,7 @@ pub enum TermType {
 /// A term in the language: either an individual variable, an individual constant,
 /// or an operation symbol of rank m > 0 applied to m sub-terms.
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub struct term {
     pub term_type: TermType,
 }
@@ -155,6 +166,7 @@ impl term {
 }
 
 /// Discriminates the four forms a formula may take.
+#[derive(Debug)]
 pub enum FormulaType {
     /// An atomic formula consisting of a single term.
     Term(term),
@@ -169,6 +181,7 @@ pub enum FormulaType {
 }
 
 /// A well-formed formula (wff) of the language.
+#[derive(Debug)]
 pub struct Formula {
     pub formula_type: FormulaType,
     pub value: Option<bool>,
@@ -180,6 +193,85 @@ impl Formula {
     /// - Atomic formulas (`Term`, `Relation`): returns `self.value.unwrap_or(false)`.
     /// - `Combination`: evaluates structurally by the connective, recursing with `context`.
     /// - `Quantifier`: delegates to the body formula.
+    /// Collect all unique variable names appearing in this formula.
+    pub fn collect_variables(&self) -> Vec<String> {
+        let mut vars = Vec::new();
+        self.collect_variables_into(&mut vars);
+        vars.sort();
+        vars.dedup();
+        vars
+    }
+
+    fn collect_variables_into(&self, vars: &mut Vec<String>) {
+        match &self.formula_type {
+            FormulaType::Term(t) => {
+                if let TermType::Variable(v) = &t.term_type {
+                    vars.push(v.name.clone());
+                }
+            }
+            FormulaType::Relation(_, terms) => {
+                for t in terms {
+                    if let TermType::Variable(v) = &t.term_type {
+                        vars.push(v.name.clone());
+                    }
+                }
+            }
+            FormulaType::Combination(_, formulas) => {
+                for f in formulas {
+                    f.collect_variables_into(vars);
+                }
+            }
+            FormulaType::Quantifier(_, v, body) => {
+                vars.push(v.name.clone());
+                body.collect_variables_into(vars);
+            }
+        }
+    }
+
+    /// Evaluate the formula under a specific variable assignment.
+    pub fn evaluate(&self, assignment: &HashMap<String, bool>) -> bool {
+        match &self.formula_type {
+            FormulaType::Term(t) => match &t.term_type {
+                TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
+                _ => self.value.unwrap_or(false),
+            },
+            FormulaType::Relation(_, _) => self.value.unwrap_or(false),
+            FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
+                "\u{2227}" => formulas.iter().all(|f| f.evaluate(assignment)),
+                "\u{2228}" => formulas.iter().any(|f| f.evaluate(assignment)),
+                "\u{00AC}" => formulas.first().map_or(false, |f| !f.evaluate(assignment)),
+                "=>" => {
+                    formulas.len() != 2
+                        || !formulas[0].evaluate(assignment)
+                        || formulas[1].evaluate(assignment)
+                }
+                "<=>" => {
+                    formulas.len() == 2
+                        && formulas[0].evaluate(assignment) == formulas[1].evaluate(assignment)
+                }
+                _ => false,
+            },
+            FormulaType::Quantifier(_, _, body) => body.evaluate(assignment),
+        }
+    }
+
+    /// Return true if the formula holds under every possible truth assignment of its variables.
+    pub fn is_tautology(&self) -> bool {
+        let vars = self.collect_variables();
+        let n = vars.len();
+        for mask in 0u64..(1u64 << n) {
+            let assignment: HashMap<String, bool> = vars
+                .iter()
+                .enumerate()
+                .map(|(i, name)| (name.clone(), (mask >> i) & 1 == 1))
+                .collect();
+            if !self.evaluate(&assignment) {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn is_true(&self, context: &[Formula]) -> bool {
         match &self.formula_type {
             FormulaType::Term(_) | FormulaType::Relation(_, _) => {
@@ -188,7 +280,7 @@ impl Formula {
             FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
                 "\u{2227}" => formulas.iter().all(|f| f.is_true(context)),
                 "\u{2228}" => formulas.iter().any(|f| f.is_true(context)),
-                "\u{007E}" => formulas.first().map_or(false, |f| !f.is_true(context)),
+                "\u{00AC}" => formulas.first().map_or(false, |f| !f.is_true(context)),
                 "=>" => {
                     formulas.len() != 2
                         || !formulas[0].is_true(context)
@@ -214,7 +306,7 @@ mod tests {
         assert!(logical_symbol::new("\u{2227}".to_string()).is_ok());
         assert!(logical_symbol::new("\u{2228}".to_string()).is_ok());
         assert!(logical_symbol::new("=>".to_string()).is_ok());
-        assert!(logical_symbol::new("\u{007E}".to_string()).is_ok());
+        assert!(logical_symbol::new("\u{00AC}".to_string()).is_ok());
         assert!(logical_symbol::new("<=>".to_string()).is_ok());
         assert!(logical_symbol::new("\u{2200}".to_string()).is_ok());
         assert!(logical_symbol::new("\u{018E}".to_string()).is_ok());
@@ -355,7 +447,7 @@ mod tests {
         let f2 = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
         let f3 = Formula { formula_type: FormulaType::Term(term::new("R".to_string(), Some(0), vec![]).unwrap()), value: None };
 
-        let not = logical_symbol::new("\u{007E}".to_string()).unwrap();
+        let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
         let not_f2 = Formula {
             formula_type: FormulaType::Combination(not, vec![f2]),
             value: None,
@@ -378,7 +470,7 @@ mod tests {
         // A \/ ~B where A is true and B is false; ~B = true, so result should be true
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let not = logical_symbol::new("\u{007E}".to_string()).unwrap();
+        let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
         let not_b = Formula {
             formula_type: FormulaType::Combination(not, vec![b]),
             value: None,
