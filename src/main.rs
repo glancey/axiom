@@ -2,20 +2,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use formalisms::{
     individual_variable, logical_symbol, operation_symbol, individual_constant,
-    relation_symbol, operation, term, Formula,
+    relation_symbol, term, Formula,
 };
 use axiom_parser::parse_formula;
 
-enum LanguageConstruct {
-    IndividualVariable(individual_variable),
-    LogicalSymbol(logical_symbol),
-    OperationSymbol(operation_symbol),
-    IndividualConstant(individual_constant),
-    RelationSymbol(relation_symbol),
-    Operation(operation),
-    Term(term),
-    Formula(Formula),
-}
 
 #[derive(Parser)]
 #[command(name = "axiom")]
@@ -38,6 +28,9 @@ enum Commands {
     Validate {
         /// String to validate
         value: String,
+        /// Optional array of arguments (required for operation_symbol; its length sets the rank)
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
     },
     /// Print descriptions of all language constructs
     Glossary,
@@ -54,6 +47,49 @@ enum Commands {
 }
 
 
+/// Parses a string of the form `O(a1, a2, ..., an)` into an [`operation_symbol`] of rank n
+/// and the corresponding `Vec<String>` of argument names.
+///
+/// Returns an error if the string is not well-formed, the argument list is empty,
+/// or the symbol name is invalid.
+fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
+    let s = s.trim();
+    let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in operation symbol"))?;
+    let name = s[..paren].trim().to_string();
+    let rest = s[paren + 1..].trim();
+    let rest = rest.strip_suffix(')').ok_or_else(|| anyhow::anyhow!("expected ')' at end of operation symbol"))?;
+    let args: Vec<String> = rest.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+    if args.is_empty() {
+        anyhow::bail!("operation_symbol requires at least one argument");
+    }
+    let rank = args.len() as u32;
+    let sym = operation_symbol::new(name, rank)?;
+    Ok((sym, args))
+}
+
+/// Parses a string of the form `re(a1, a2, ..., an)` into a [`relation_symbol`] of rank n
+/// and the corresponding `Vec<String>` of argument names.
+///
+/// Returns an error if the string is not well-formed, the argument list is empty,
+/// n is not in the range 1–5, or the symbol name is invalid.
+fn parse_relation_symbol(s: &str) -> Result<(relation_symbol, Vec<String>)> {
+    let s = s.trim();
+    let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in relation symbol"))?;
+    let name = s[..paren].trim().to_string();
+    let rest = s[paren + 1..].trim();
+    let rest = rest.strip_suffix(')').ok_or_else(|| anyhow::anyhow!("expected ')' at end of relation symbol"))?;
+    let args: Vec<String> = rest.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+    if args.is_empty() {
+        anyhow::bail!("relation_symbol requires at least one argument");
+    }
+    let rank = args.len() as u32;
+    if rank > 5 {
+        anyhow::bail!("relation_symbol rank must be 1–5, got {rank}");
+    }
+    let sym = relation_symbol::new(name, rank)?;
+    Ok((sym, args))
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -64,7 +100,7 @@ fn main() -> Result<()> {
                 Err(_) => println!("Name cannot be empty."),
             }
         }
-        Commands::Validate { value } => {
+        Commands::Validate { value, args } => {
             println!("Select type to validate against:");
             println!("  1. individual_variable");
             println!("  2. logical_symbol");
@@ -76,41 +112,36 @@ fn main() -> Result<()> {
             let mut input = String::new();
             std::io::stdin().read_line(&mut input)?;
 
-            let result: Result<LanguageConstruct> = match input.trim() {
-                "1" => individual_variable::new(&value).map(LanguageConstruct::IndividualVariable),
-                "2" => logical_symbol::new(value.clone()).map(LanguageConstruct::LogicalSymbol),
+            let result: Result<String> = match input.trim() {
+                "1" => individual_variable::new(&value).map(|_| format!("individual_variable({value})")),
+                "2" => logical_symbol::new(value.clone()).map(|_| format!("logical_symbol({value})")),
                 "3" => {
-                    print!("Enter rank: ");
-                    let mut rank_input = String::new();
-                    std::io::stdin().read_line(&mut rank_input)?;
-                    let rank: u32 = rank_input.trim().parse()?;
-                    operation_symbol::new(value.clone(), rank).map(LanguageConstruct::OperationSymbol)
+                    if value.contains('(') {
+                        parse_operation_symbol(&value).map(|(sym, _)| format!("operation_symbol({}, rank={})", sym.symbol, sym.rank))
+                    } else if args.is_empty() {
+                        anyhow::bail!("operation_symbol requires at least one argument");
+                    } else {
+                        let rank = args.len() as u32;
+                        operation_symbol::new(value.clone(), rank).map(|_| format!("operation_symbol({value}, rank={rank})"))
+                    }
                 }
-                "4" => individual_constant::new(value.clone()).map(LanguageConstruct::IndividualConstant),
+                "4" => individual_constant::new(value.clone()).map(|_| format!("individual_constant({value})")),
                 "5" => {
-                    print!("Enter rank (1–5): ");
-                    let mut rank_input = String::new();
-                    std::io::stdin().read_line(&mut rank_input)?;
-                    let rank: u32 = rank_input.trim().parse()?;
-                    relation_symbol::new(value.clone(), rank).map(LanguageConstruct::RelationSymbol)
+                    if value.contains('(') {
+                        parse_relation_symbol(&value).map(|(sym, _)| format!("relation_symbol({}, rank={})", sym.0.symbol, sym.0.rank))
+                    } else if args.is_empty() {
+                        anyhow::bail!("relation_symbol requires at least one argument");
+                    } else {
+                        let rank = args.len() as u32;
+                        relation_symbol::new(value.clone(), rank).map(|_| format!("relation_symbol({value}, rank={rank})"))
+                    }
                 }
-                "6" => term::new(value.clone(), None, vec![]).map(LanguageConstruct::Term),
+                "6" => term::new(value.clone(), None, vec![]).map(|_| format!("term({value})")),
                 _ => anyhow::bail!("invalid selection"),
             };
 
             match result {
-                Ok(construct) => {
-                    let name = match &construct {
-                        LanguageConstruct::IndividualVariable(_) => "individual_variable",
-                        LanguageConstruct::LogicalSymbol(_) => "logical_symbol",
-                        LanguageConstruct::OperationSymbol(_) => "operation_symbol",
-                        LanguageConstruct::IndividualConstant(_) => "individual_constant",
-                        LanguageConstruct::RelationSymbol(_) => "relation_symbol",
-                        LanguageConstruct::Term(_) => "term",
-                        _ => unreachable!(),
-                    };
-                    println!("{name}({value})");
-                }
+                Ok(output) => println!("{output}"),
                 Err(e) => println!("Error: {e}"),
             }
         }
@@ -183,6 +214,24 @@ mod tests {
         }
     }
 
+    fn validate_operation_symbol(value: &str, args: &[&str]) -> String {
+        if args.is_empty() {
+            return "Error: operation_symbol requires at least one argument".to_string();
+        }
+        let rank = args.len() as u32;
+        match operation_symbol::new(value.to_string(), rank) {
+            Ok(_) => format!("operation_symbol({value}, rank={rank})"),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    fn validate_operation_symbol_from_str(s: &str) -> String {
+        match parse_operation_symbol(s) {
+            Ok((sym, _)) => format!("operation_symbol({}, rank={})", sym.symbol, sym.rank),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
     #[test]
     fn validate_single_uppercase_letter() {
         assert_eq!(validate("A"), "individual_variable(A)");
@@ -207,6 +256,79 @@ mod tests {
     #[test]
     fn validate_empty_is_error() {
         assert!(validate("").starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_operation_symbol_rank_from_args() {
+        assert_eq!(validate_operation_symbol("f", &["x"]), "operation_symbol(f, rank=1)");
+        assert_eq!(validate_operation_symbol("f", &["x", "y", "z"]), "operation_symbol(f, rank=3)");
+    }
+
+    #[test]
+    fn validate_operation_symbol_empty_args_is_error() {
+        assert!(validate_operation_symbol("f", &[]).starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_operation_symbol_zero_rank() {
+        assert_eq!(validate_operation_symbol("f", &[]), "Error: operation_symbol requires at least one argument");
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_rank_1() {
+        assert_eq!(validate_operation_symbol_from_str("f(a)"), "operation_symbol(f, rank=1)");
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_rank_3() {
+        assert_eq!(validate_operation_symbol_from_str("op(a1, a2, a3)"), "operation_symbol(op, rank=3)");
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_empty_args_is_error() {
+        assert!(validate_operation_symbol_from_str("f()").starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_operation_symbol_from_str_missing_paren_is_error() {
+        assert!(validate_operation_symbol_from_str("f").starts_with("Error:"));
+    }
+
+    fn validate_relation_symbol_from_str(s: &str) -> String {
+        match parse_relation_symbol(s) {
+            Ok((sym, _)) => format!("relation_symbol({}, rank={})", sym.0.symbol, sym.0.rank),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_1() {
+        assert_eq!(validate_relation_symbol_from_str("rel(a)"), "relation_symbol(rel, rank=1)");
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_3() {
+        assert_eq!(validate_relation_symbol_from_str("rel(a1, a2, a3)"), "relation_symbol(rel, rank=3)");
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_5() {
+        assert_eq!(validate_relation_symbol_from_str("rel(a1, a2, a3, a4, a5)"), "relation_symbol(rel, rank=5)");
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_empty_args_is_error() {
+        assert!(validate_relation_symbol_from_str("rel()").starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_rank_6_is_error() {
+        assert!(validate_relation_symbol_from_str("rel(a1, a2, a3, a4, a5, a6)").starts_with("Error:"));
+    }
+
+    #[test]
+    fn validate_relation_symbol_from_str_missing_paren_is_error() {
+        assert!(validate_relation_symbol_from_str("rel").starts_with("Error:"));
     }
 
     #[test]
