@@ -52,6 +52,36 @@ enum Commands {
 ///
 /// Returns an error if the string is not well-formed, the argument list is empty,
 /// or the symbol name is invalid.
+/// Normalizes natural-language negation into `¬` before parsing:
+/// - `not(expr)` → `¬(expr)`
+/// - `notX` where X is an uppercase ASCII letter → `¬X`
+fn normalize_formula(s: &str) -> String {
+    let mut result = String::new();
+    let mut i = 0;
+    while i < s.len() {
+        if s[i..].starts_with("not(") {
+            result.push('\u{00AC}');
+            result.push('(');
+            i += 4;
+        } else if s[i..].starts_with("not") {
+            let after = s[i + 3..].chars().next();
+            if after.map_or(false, |c| c.is_ascii_uppercase()) {
+                result.push('\u{00AC}');
+                i += 3;
+            } else {
+                let c = s[i..].chars().next().unwrap();
+                result.push(c);
+                i += c.len_utf8();
+            }
+        } else {
+            let c = s[i..].chars().next().unwrap();
+            result.push(c);
+            i += c.len_utf8();
+        }
+    }
+    result
+}
+
 fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
     let s = s.trim();
     let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in operation symbol"))?;
@@ -146,30 +176,31 @@ fn main() -> Result<()> {
             }
         }
         Commands::CheckFormula { value } => {
-            let is_symbol_application = value
+            let normalized = normalize_formula(&value);
+            let is_symbol_application = normalized
                 .chars().next().map_or(false, |c| c.is_ascii_lowercase())
-                && value.contains('(');
-            if is_symbol_application {
-                let formula_str = if let Ok((sym, args)) = parse_relation_symbol(&value) {
+                && normalized.contains('(');
+            let formula_str = if is_symbol_application {
+                if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
                     format!("{}({})", sym.0.symbol, args.join(", "))
-                } else if let Ok((sym, args)) = parse_operation_symbol(&value) {
+                } else if let Ok((sym, args)) = parse_operation_symbol(&normalized) {
                     format!("{}({})", sym.symbol, args.join(", "))
                 } else {
-                    value.clone()
-                };
-                match parse_formula(&formula_str) {
-                    Ok(ft) => println!("Valid formula: {formula_str}\n{ft:#?}"),
-                    Err(e) => println!("Invalid formula: {e}"),
+                    normalized
                 }
             } else {
-                match parse_formula(&value) {
-                    Ok(ft) => println!("Valid formula: {value}\n{ft:#?}"),
-                    Err(e) => println!("Invalid formula: {e}"),
-                }
+                normalized
+            };
+            let parse_str = if !formula_str.starts_with('(') { format!("({formula_str})") } else { formula_str.clone() };
+            match parse_formula(&parse_str) {
+                Ok(ft) => println!("Valid formula: {formula_str}\n{ft:#?}"),
+                Err(e) => println!("Invalid formula: {e}"),
             }
         }
         Commands::TautologicalProof { value } => {
-            match parse_formula(&value) {
+            let normalized = normalize_formula(&value);
+            let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
+            match parse_formula(&parse_str) {
                 Err(e) => println!("Invalid formula: {e}"),
                 Ok(ft) => {
                     let formula = Formula { formula_type: ft, value: None };
@@ -189,7 +220,7 @@ fn main() -> Result<()> {
             println!();
             println!("logical_symbol");
             println!("  One of the fixed logical connectives and punctuation symbols of the language:");
-            println!("  ∧ (and), ∨ (or), => (implies), ~ (not), <=> (iff),");
+            println!("  ∧ (and), ∨ (or), => (implies), ¬ (not), <=> (iff),");
             println!("  ∀ (for all), Ǝ (there exists), == (equals), (, )");
             println!();
             println!("operation_symbol");
@@ -362,18 +393,23 @@ mod tests {
     }
 
     fn check_formula_symbol(value: &str) -> String {
-        let is_symbol_application = value
+        let normalized = normalize_formula(value);
+        let is_symbol_application = normalized
             .chars().next().map_or(false, |c| c.is_ascii_lowercase())
-            && value.contains('(');
+            && normalized.contains('(');
         if is_symbol_application {
-            if let Ok((sym, args)) = parse_relation_symbol(value) {
+            if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
                 return format!("relation_symbol({}, rank={}), args: {:?}", sym.0.symbol, sym.0.rank, args);
             }
-            if let Ok((sym, args)) = parse_operation_symbol(value) {
+            if let Ok((sym, args)) = parse_operation_symbol(&normalized) {
                 return format!("operation_symbol({}, rank={}), args: {:?}", sym.symbol, sym.rank, args);
             }
         }
-        check_formula(value)
+        let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
+        match parse_formula(&parse_str) {
+            Ok(_) => format!("Valid formula: {normalized}"),
+            Err(e) => format!("Invalid formula: {e}"),
+        }
     }
 
     #[test]
@@ -416,6 +452,21 @@ mod tests {
     #[test]
     fn check_formula_no_parens_falls_back_to_formula() {
         assert_eq!(check_formula_symbol("P=>Q"), "Valid formula: P=>Q");
+    }
+
+    #[test]
+    fn check_formula_not_variable() {
+        assert_eq!(check_formula_symbol("not(A)"), "Valid formula: \u{00AC}(A)");
+    }
+
+    #[test]
+    fn check_formula_not_implication() {
+        assert_eq!(check_formula_symbol("not(A => B)"), "Valid formula: \u{00AC}(A => B)");
+    }
+
+    #[test]
+    fn check_formula_not_conjunction() {
+        assert_eq!(check_formula_symbol("not(A ∧ B)"), "Valid formula: \u{00AC}(A ∧ B)");
     }
 
     fn tautological_proof(value: &str) -> String {

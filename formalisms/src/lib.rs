@@ -31,7 +31,7 @@ impl individual_variable {
 }
 
 /// One of the fixed logical connectives and punctuation symbols of the language:
-/// `/\` (and), `\/` (or), `=>` (implies), `~` (not), `<=>` (iff),
+/// `/\` (and), `\/` (or), `=>` (implies), `¬` (not), `<=>` (iff),
 /// `∀` (for all), `Ǝ` (there exists), `==` (equals), `(`, `)`
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -40,7 +40,7 @@ pub struct logical_symbol(String);
 impl logical_symbol {
     pub fn new(s: String) -> Result<Self> {
         const VALID: &[&str] = &[
-            "\u{2227}", "\u{2228}", "=>", "\u{007E}", "<=>",
+            "\u{2227}", "\u{2228}", "=>", "\u{00AC}", "<=>",
             "\u{2200}", "\u{018E}", "==", "(", ")",
         ];
         if VALID.contains(&s.as_str()) {
@@ -239,7 +239,7 @@ impl Formula {
             FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
                 "\u{2227}" => formulas.iter().all(|f| f.evaluate(assignment)),
                 "\u{2228}" => formulas.iter().any(|f| f.evaluate(assignment)),
-                "\u{007E}" => formulas.first().map_or(false, |f| !f.evaluate(assignment)),
+                "\u{00AC}" => formulas.first().map_or(false, |f| !f.evaluate(assignment)),
                 "=>" => {
                     formulas.len() != 2
                         || !formulas[0].evaluate(assignment)
@@ -280,7 +280,7 @@ impl Formula {
             FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
                 "\u{2227}" => formulas.iter().all(|f| f.is_true(context)),
                 "\u{2228}" => formulas.iter().any(|f| f.is_true(context)),
-                "\u{007E}" => formulas.first().map_or(false, |f| !f.is_true(context)),
+                "\u{00AC}" => formulas.first().map_or(false, |f| !f.is_true(context)),
                 "=>" => {
                     formulas.len() != 2
                         || !formulas[0].is_true(context)
@@ -306,7 +306,7 @@ mod tests {
         assert!(logical_symbol::new("\u{2227}".to_string()).is_ok());
         assert!(logical_symbol::new("\u{2228}".to_string()).is_ok());
         assert!(logical_symbol::new("=>".to_string()).is_ok());
-        assert!(logical_symbol::new("\u{007E}".to_string()).is_ok());
+        assert!(logical_symbol::new("\u{00AC}".to_string()).is_ok());
         assert!(logical_symbol::new("<=>".to_string()).is_ok());
         assert!(logical_symbol::new("\u{2200}".to_string()).is_ok());
         assert!(logical_symbol::new("\u{018E}".to_string()).is_ok());
@@ -447,7 +447,7 @@ mod tests {
         let f2 = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
         let f3 = Formula { formula_type: FormulaType::Term(term::new("R".to_string(), Some(0), vec![]).unwrap()), value: None };
 
-        let not = logical_symbol::new("\u{007E}".to_string()).unwrap();
+        let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
         let not_f2 = Formula {
             formula_type: FormulaType::Combination(not, vec![f2]),
             value: None,
@@ -470,7 +470,7 @@ mod tests {
         // A \/ ~B where A is true and B is false; ~B = true, so result should be true
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let not = logical_symbol::new("\u{007E}".to_string()).unwrap();
+        let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
         let not_b = Formula {
             formula_type: FormulaType::Combination(not, vec![b]),
             value: None,

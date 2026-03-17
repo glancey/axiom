@@ -10,7 +10,7 @@ use formalisms::{
 /// ```text
 /// formula  := quantifier | negation | combination | atomic
 /// quantifier := ('∀' | 'Ǝ') variable '.' formula
-/// negation   := '~' formula
+/// negation   := '\u{00AC}' formula
 /// combination := '(' formula ('∧'|'∨'|'/\'|'\/'|'=>'|'<=>'|'==') formula ')'
 /// atomic     := variable | relation | constant
 /// relation   := name '(' term (',' term)* ')'
@@ -26,11 +26,11 @@ pub fn parse_formula(s: &str) -> Result<FormulaType> {
     let s = s.replace("there exists", "\u{018E}");
     let s = s.replace(" and ", " \u{2227} ");
     let s = s.replace(" or ", " \u{2228} ");
-    let s = s.replace(" -", " ~");
+    let s = s.replace(" not ", "\u{00AC}");
     let s = s.trim().to_string();
     let s = s.as_str();
     let normalized = if s.starts_with('(')
-        || s.starts_with('~')
+        || s.starts_with('\u{00AC}')
         || s.starts_with('\u{2200}')
         || s.starts_with('\u{018E}')
     {
@@ -85,15 +85,15 @@ impl Parser {
     }
 
     /// Dispatches to the appropriate sub-parser based on the next character:
-    /// `∀`/`Ǝ` → quantifier, `~` → negation, `(` → combination, otherwise → atomic.
+    /// `∀`/`Ǝ` → quantifier, `¬` → negation, `(` → combination, otherwise → atomic.
     fn formula(&mut self) -> Result<FormulaType> {
         self.skip_ws();
         if self.rest().starts_with('\u{2200}') || self.rest().starts_with('\u{018E}') {
             return self.quantifier();
         }
-        if self.rest().starts_with('~') {
-            self.pos += 1;
-            let sym = logical_symbol::new("~".to_string())?;
+        if self.rest().starts_with('\u{00AC}') {
+            self.pos += '\u{00AC}'.len_utf8();
+            let sym = logical_symbol::new("\u{00AC}".to_string())?;
             let body = Formula { formula_type: self.formula()?, value: None };
             return Ok(FormulaType::Combination(sym, vec![body]));
         }
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn parse_formula_negation() {
-        assert!(matches!(parse_formula("~A"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("¬A"), Ok(FormulaType::Combination(_, _))));
     }
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn parse_formula_nested() {
-        assert!(matches!(parse_formula("(~A => B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(¬A => B)"), Ok(FormulaType::Combination(_, _))));
         assert!(matches!(parse_formula("∀X.(A ∧ B)"), Ok(FormulaType::Quantifier(_, _, _))));
     }
 
