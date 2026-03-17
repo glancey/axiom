@@ -1,6 +1,6 @@
 # axiom
 
-A CLI tool for constructing, validating, and evaluating well-formed formulas (wffs) of a first-order logic formal language.
+A CLI tool for constructing, validating, and evaluating well-formed formulas (wffs) of a first-order logic formal language, based on Monk's formalization in his book, *Introduction to Set Theory*.
 
 ## Workspace
 
@@ -203,3 +203,18 @@ A well-formed formula (wff). Supports evaluation via `is_true`, `evaluate` (unde
 ```sh
 cargo test --workspace
 ```
+
+---
+
+## To Do
+
+1. Create and display a truth table for proven tautologies.
+2. Create and display a formal proof ala Kalish and Montague in their book, *Logic*.
+
+---
+
+## Bibliography
+
+Monk, J. Donald. *Introduction to Set Theory*. McGraw-Hill, Inc., 1969. Library of Congress Card Number 68-20056.
+
+Kalish, Donald, and Richard Montague. *Logic: Techniques of Formal Reasoning*. Harcourt, Brace & World, Inc., 1964. ISBN 0-15-551180-7.
