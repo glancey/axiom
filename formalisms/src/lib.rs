@@ -255,7 +255,77 @@ impl Formula {
         }
     }
 
+    /// Renders the formula as a human-readable expression string.
+    fn display_str(&self) -> String {
+        fn fmt_term(t: &term) -> String {
+            match &t.term_type {
+                TermType::Variable(v) => v.name.clone(),
+                TermType::Constant(c) => c.0.symbol.clone(),
+                TermType::Operation(o) => {
+                    let args: Vec<String> = o.vars.iter().map(fmt_term).collect();
+                    format!("{}({})", o.symbol.symbol, args.join(", "))
+                }
+            }
+        }
+        match &self.formula_type {
+            FormulaType::Term(t) => fmt_term(t),
+            FormulaType::Relation(sym, terms) => {
+                let args: Vec<String> = terms.iter().map(fmt_term).collect();
+                format!("{}({})", sym.0.symbol, args.join(", "))
+            }
+            FormulaType::Combination(sym, formulas) => {
+                if formulas.len() == 1 {
+                    format!("{}({})", sym.0, formulas[0].display_str())
+                } else {
+                    let parts: Vec<String> = formulas.iter().map(|f| f.display_str()).collect();
+                    format!("({})", parts.join(&format!(" {} ", sym.0)))
+                }
+            }
+            FormulaType::Quantifier(sym, v, body) => {
+                format!("{}{}.{}", sym.0, v.name, body.display_str())
+            }
+        }
+    }
+
+    /// Recursively evaluates and prints the truth value of each sub-formula
+    /// (Terms, Relations, and Combinations) under the given assignment.
+    fn evaluate_verbose(&self, assignment: &HashMap<String, bool>) -> bool {
+        match &self.formula_type {
+            FormulaType::Term(t) => {
+                let val = match &t.term_type {
+                    TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
+                    _ => self.value.unwrap_or(false),
+                };
+                println!("  {} = {}", self.display_str(), val);
+                val
+            }
+            FormulaType::Relation(_, _) => {
+                let val = self.value.unwrap_or(false);
+                println!("  {} = {}", self.display_str(), val);
+                val
+            }
+            FormulaType::Combination(_, formulas) => {
+                let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment)).collect();
+                let val = match &self.formula_type {
+                    FormulaType::Combination(sym, _) => match sym.0.as_str() {
+                        "\u{2227}" => sub_results.iter().all(|&v| v),
+                        "\u{2228}" => sub_results.iter().any(|&v| v),
+                        "\u{00AC}" => sub_results.first().map_or(false, |&v| !v),
+                        "=>" => sub_results.len() != 2 || !sub_results[0] || sub_results[1],
+                        "<=>" => sub_results.len() == 2 && sub_results[0] == sub_results[1],
+                        _ => false,
+                    },
+                    _ => unreachable!(),
+                };
+                println!("  {} = {}", self.display_str(), val);
+                val
+            }
+            FormulaType::Quantifier(_, _, body) => body.evaluate_verbose(assignment),
+        }
+    }
+
     /// Return true if the formula holds under every possible truth assignment of its variables.
+    /// Prints each assignment and its evaluation result, including sub-formula results.
     pub fn is_tautology(&self) -> bool {
         let vars = self.collect_variables();
         let n = vars.len();
@@ -265,7 +335,13 @@ impl Formula {
                 .enumerate()
                 .map(|(i, name)| (name.clone(), (mask >> i) & 1 == 1))
                 .collect();
-            if !self.evaluate(&assignment) {
+            let mut sorted: Vec<(&String, &bool)> = assignment.iter().collect();
+            sorted.sort_by_key(|(k, _)| *k);
+            let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            println!("assignment: [{}]", row.join(", "));
+            let result = self.evaluate_verbose(&assignment);
+            println!("result => {}", result);
+            if !result {
                 return false;
             }
         }
@@ -649,6 +725,102 @@ mod tests {
             value: None,
         };
         assert!(matches!(formula.formula_type, FormulaType::Quantifier(_, _, _)));
+    }
+
+    #[test]
+    fn is_tautology_excluded_middle() {
+        // A \/ ¬A is a tautology
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
+        let not_a = Formula { formula_type: FormulaType::Combination(not, vec![a2]), value: None };
+        let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
+        let formula = Formula {
+            formula_type: FormulaType::Combination(or, vec![a1, not_a]),
+            value: None,
+        };
+        assert!(formula.is_tautology());
+    }
+
+    #[test]
+    fn is_tautology_self_implication() {
+        // A => A is a tautology
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let formula = Formula {
+            formula_type: FormulaType::Combination(implies, vec![a1, a2]),
+            value: None,
+        };
+        assert!(formula.is_tautology());
+    }
+
+    #[test]
+    fn is_tautology_double_negation() {
+        // ¬¬A <=> A is a tautology
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let not1 = logical_symbol::new("\u{00AC}".to_string()).unwrap();
+        let not_a = Formula { formula_type: FormulaType::Combination(not1, vec![a1]), value: None };
+        let not2 = logical_symbol::new("\u{00AC}".to_string()).unwrap();
+        let not_not_a = Formula { formula_type: FormulaType::Combination(not2, vec![not_a]), value: None };
+        let iff = logical_symbol::new("<=>".to_string()).unwrap();
+        let formula = Formula {
+            formula_type: FormulaType::Combination(iff, vec![not_not_a, a2]),
+            value: None,
+        };
+        assert!(formula.is_tautology());
+    }
+
+    #[test]
+    fn is_tautology_conjunction_not_tautology() {
+        // A /\ B is not a tautology (false when A=false or B=false)
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
+        let formula = Formula {
+            formula_type: FormulaType::Combination(and, vec![a, b]),
+            value: None,
+        };
+        assert!(!formula.is_tautology());
+    }
+
+    #[test]
+    fn is_tautology_hypothetical_syllogism() {
+        // (A => B) => ((B => C) => (A => C)) is a tautology
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let b1 = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let b2 = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let c1 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
+        let c2 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
+
+        // A => B
+        let a_implies_b = Formula {
+            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a1, b1]),
+            value: None,
+        };
+        // B => C
+        let b_implies_c = Formula {
+            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![b2, c1]),
+            value: None,
+        };
+        // A => C
+        let a_implies_c = Formula {
+            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a2, c2]),
+            value: None,
+        };
+        // (B => C) => (A => C)
+        let inner = Formula {
+            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![b_implies_c, a_implies_c]),
+            value: None,
+        };
+        // (A => B) => ((B => C) => (A => C))
+        let formula = Formula {
+            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a_implies_b, inner]),
+            value: None,
+        };
+        assert!(formula.is_tautology());
     }
 
 }
