@@ -54,7 +54,7 @@ impl logical_symbol {
 /// A named symbol used to build terms and relations.
 /// Must not be a `logical_symbol` or an `individual_variable`.
 /// Carries a `rank` indicating the number of arguments the symbol takes.
-/// Example: In mathematical terms, an operation, O, of rank 10, would be 
+/// Example: In mathematical terms, an operation, O, of rank 10, would be
 /// represented as O(a0, a1, a2,... a9).
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -185,6 +185,7 @@ pub enum FormulaType {
 pub struct Formula {
     pub formula_type: FormulaType,
     pub value: Option<bool>,
+    pub sub_formula_values: HashMap<String, bool>,
 }
 
 impl Formula {
@@ -289,44 +290,46 @@ impl Formula {
 
     /// Recursively evaluates and prints the truth value of each sub-formula
     /// (Terms, Relations, and Combinations) under the given assignment.
-    fn evaluate_verbose(&self, assignment: &HashMap<String, bool>) -> bool {
-        match &self.formula_type {
-            FormulaType::Term(t) => {
-                let val = match &t.term_type {
-                    TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
-                    _ => self.value.unwrap_or(false),
-                };
-                println!("  {} = {}", self.display_str(), val);
-                val
+    /// Results are also stored in `self.sub_formula_values`.
+    fn evaluate_verbose(&mut self, assignment: &HashMap<String, bool>) -> bool {
+        let key = self.display_str();
+        let value_field = self.value;
+        let mut collected: Vec<(String, bool)> = Vec::new();
+        let val = match &mut self.formula_type {
+            FormulaType::Term(t) => match &t.term_type {
+                TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
+                _ => value_field.unwrap_or(false),
+            },
+            FormulaType::Relation(_, _) => value_field.unwrap_or(false),
+            FormulaType::Combination(sym, formulas) => {
+                let sym_str = sym.0.clone();
+                let sub_results: Vec<bool> = formulas
+                    .iter_mut()
+                    .map(|f| f.evaluate_verbose(assignment))
+                    .collect();
+                for f in formulas.iter() {
+                    collected.extend(f.sub_formula_values.iter().map(|(k, v)| (k.clone(), *v)));
+                }
+                match sym_str.as_str() {
+                    "\u{2227}" => sub_results.iter().all(|&v| v),
+                    "\u{2228}" => sub_results.iter().any(|&v| v),
+                    "\u{00AC}" => sub_results.first().map_or(false, |&v| !v),
+                    "=>" => sub_results.len() != 2 || !sub_results[0] || sub_results[1],
+                    "<=>" => sub_results.len() == 2 && sub_results[0] == sub_results[1],
+                    _ => false,
+                }
             }
-            FormulaType::Relation(_, _) => {
-                let val = self.value.unwrap_or(false);
-                println!("  {} = {}", self.display_str(), val);
-                val
-            }
-            FormulaType::Combination(_, formulas) => {
-                let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment)).collect();
-                let val = match &self.formula_type {
-                    FormulaType::Combination(sym, _) => match sym.0.as_str() {
-                        "\u{2227}" => sub_results.iter().all(|&v| v),
-                        "\u{2228}" => sub_results.iter().any(|&v| v),
-                        "\u{00AC}" => sub_results.first().map_or(false, |&v| !v),
-                        "=>" => sub_results.len() != 2 || !sub_results[0] || sub_results[1],
-                        "<=>" => sub_results.len() == 2 && sub_results[0] == sub_results[1],
-                        _ => false,
-                    },
-                    _ => unreachable!(),
-                };
-                println!("  {} = {}", self.display_str(), val);
-                val
-            }
-            FormulaType::Quantifier(_, _, body) => body.evaluate_verbose(assignment),
-        }
+            FormulaType::Quantifier(_, _, body) => return body.evaluate_verbose(assignment),
+        };
+        println!("  {} = {}", key, val);
+        self.sub_formula_values.extend(collected);
+        self.sub_formula_values.insert(key, val);
+        val
     }
 
     /// Return true if the formula holds under every possible truth assignment of its variables.
     /// Prints each assignment and its evaluation result, including sub-formula results.
-    pub fn is_tautology(&self) -> bool {
+    pub fn is_tautology(&mut self) -> bool {
         let vars = self.collect_variables();
         let n = vars.len();
         for mask in 0u64..(1u64 << n) {
@@ -445,14 +448,15 @@ mod tests {
         // Build two atomic term formulas: Term(A) and Term(B)
         let t1 = term::new("A".to_string(), None, vec![]).unwrap();
         let t2 = term::new("B".to_string(), None, vec![]).unwrap();
-        let f1 = Formula { formula_type: FormulaType::Term(t1), value: None };
-        let f2 = Formula { formula_type: FormulaType::Term(t2), value: None };
+        let f1 = Formula { formula_type: FormulaType::Term(t1), value: None, sub_formula_values: HashMap::new() };
+        let f2 = Formula { formula_type: FormulaType::Term(t2), value: None, sub_formula_values: HashMap::new() };
 
         // Combine with /\ (conjunction)
         let conj = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let combo = Formula {
             formula_type: FormulaType::Combination(conj, vec![f1, f2]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(matches!(combo.formula_type, FormulaType::Combination(_, _)));
     }
@@ -460,13 +464,14 @@ mod tests {
     #[test]
     fn formula_combination_implication() {
         // P => Q where P = Term(X), Q = Term(Y)
-        let p = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None };
-        let q = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None };
+        let p = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let q = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
 
         let implies = logical_symbol::new("=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![p, q]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(matches!(formula.formula_type, FormulaType::Combination(_, _)));
     }
@@ -474,17 +479,18 @@ mod tests {
     #[test]
     fn formula_combination_nested() {
         // (A /\ B) \/ C
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
-        let c = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let c = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
 
         let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
-        let a_and_b = Formula { formula_type: FormulaType::Combination(and, vec![a, b]), value: None };
+        let a_and_b = Formula { formula_type: FormulaType::Combination(and, vec![a, b]), value: None, sub_formula_values: HashMap::new() };
 
         let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
         let result = Formula {
             formula_type: FormulaType::Combination(or, vec![a_and_b, c]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(matches!(result.formula_type, FormulaType::Combination(_, _)));
     }
@@ -493,11 +499,12 @@ mod tests {
     fn formula_quantifier_universal() {
         // ∀X . Term(X)
         let x = individual_variable::new("X").unwrap();
-        let body = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None };
+        let body = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let forall = logical_symbol::new("\u{2200}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Quantifier(forall, x, Box::new(body)),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(matches!(formula.formula_type, FormulaType::Quantifier(_, _, _)));
     }
@@ -506,11 +513,12 @@ mod tests {
     fn formula_quantifier_existential() {
         // ƎY . Term(Y)
         let y = individual_variable::new("Y").unwrap();
-        let body = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None };
+        let body = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let exists = logical_symbol::new("\u{018E}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Quantifier(exists, y, Box::new(body)),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(matches!(formula.formula_type, FormulaType::Quantifier(_, _, _)));
     }
@@ -519,24 +527,27 @@ mod tests {
     fn is_true_nested_implication_f1_true_f2_true() {
         // f1 => (~f2 => f3) where f1 and f2 are true, f3 has no value (defaults to false)
         // ~f2 = false, so (~f2 => f3) is vacuously true, so f1 => true = true
-        let f1 = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
-        let f2 = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
-        let f3 = Formula { formula_type: FormulaType::Term(term::new("R".to_string(), Some(0), vec![]).unwrap()), value: None };
+        let f1 = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let f2 = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let f3 = Formula { formula_type: FormulaType::Term(term::new("R".to_string(), Some(0), vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
 
         let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
         let not_f2 = Formula {
             formula_type: FormulaType::Combination(not, vec![f2]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         let inner_implies = logical_symbol::new("=>".to_string()).unwrap();
         let inner = Formula {
             formula_type: FormulaType::Combination(inner_implies, vec![not_f2, f3]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         let outer_implies = logical_symbol::new("=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(outer_implies, vec![f1, inner]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -544,17 +555,19 @@ mod tests {
     #[test]
     fn is_true_disjunction_true_or_not_false() {
         // A \/ ~B where A is true and B is false; ~B = true, so result should be true
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
         let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
         let not_b = Formula {
             formula_type: FormulaType::Combination(not, vec![b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(or, vec![a, not_b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -562,12 +575,13 @@ mod tests {
     #[test]
     fn is_true_iff_false_iff_false() {
         // A <=> B where A is false and B is false; result should be true
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
         let iff = logical_symbol::new("<=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(iff, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -575,12 +589,13 @@ mod tests {
     #[test]
     fn is_true_iff_true_iff_false() {
         // A <=> B where A is true and B is false; result should be false
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
         let iff = logical_symbol::new("<=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(iff, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(!formula.is_true(&[]));
     }
@@ -588,12 +603,13 @@ mod tests {
     #[test]
     fn is_true_conjunction_false_and_false() {
         // A /\ B where A is false and B is false; result should be false
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
         let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(!formula.is_true(&[]));
     }
@@ -601,12 +617,13 @@ mod tests {
     #[test]
     fn is_true_disjunction_true_or_false() {
         // A \/ B where A is true and B is false; result should be true
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
         let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(or, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -614,12 +631,13 @@ mod tests {
     #[test]
     fn is_true_conjunction_true_and_true() {
         // A /\ B where A is true and B is true; result should be true
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(true) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
         let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -627,12 +645,13 @@ mod tests {
     #[test]
     fn is_true_conjunction_true_and_false() {
         // A /\ B where A is true and B is false; result should be false
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
         let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(!formula.is_true(&[]));
     }
@@ -640,12 +659,13 @@ mod tests {
     #[test]
     fn is_true_implication_true_implies_true() {
         // A => B where A is true and B is true; result should be true
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(true) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
         let implies = logical_symbol::new("=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -653,12 +673,13 @@ mod tests {
     #[test]
     fn is_true_implication_false_implies_any() {
         // A => B where A is false; result should be true regardless of B
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let implies = logical_symbol::new("=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -666,12 +687,13 @@ mod tests {
     #[test]
     fn is_true_implication_true_implies_no_value() {
         // A => B where A is true and B has no assigned value (defaults to false); result should be false
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let implies = logical_symbol::new("=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(!formula.is_true(&[]));
     }
@@ -679,12 +701,13 @@ mod tests {
     #[test]
     fn is_true_implication_true_implies_false() {
         // A => B where A is true and B is false; result should be false
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false), sub_formula_values: HashMap::new() };
         let implies = logical_symbol::new("=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(!formula.is_true(&[]));
     }
@@ -695,18 +718,20 @@ mod tests {
         // result should always be true:
         //   - if f3 is true:  (true /\ true) => true  = true => true  = true
         //   - if f3 is false/unset: (true /\ false) => true = false => true = true
-        let f1 = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
-        let f2 = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
-        let f3 = Formula { formula_type: FormulaType::Term(term::new("R".to_string(), Some(0), vec![]).unwrap()), value: None };
+        let f1 = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let f2 = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true), sub_formula_values: HashMap::new() };
+        let f3 = Formula { formula_type: FormulaType::Term(term::new("R".to_string(), Some(0), vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
         let antecedent = Formula {
             formula_type: FormulaType::Combination(and, vec![f1, f3]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         let implies = logical_symbol::new("=>".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![antecedent, f2]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_true(&[]));
     }
@@ -715,14 +740,15 @@ mod tests {
     fn formula_quantifier_over_combination() {
         // ∀X . (Term(X) /\ Term(Y))
         let x = individual_variable::new("X").unwrap();
-        let fx = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None };
-        let fy = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None };
+        let fx = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let fy = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
-        let body = Formula { formula_type: FormulaType::Combination(and, vec![fx, fy]), value: None };
+        let body = Formula { formula_type: FormulaType::Combination(and, vec![fx, fy]), value: None, sub_formula_values: HashMap::new() };
         let forall = logical_symbol::new("\u{2200}".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Quantifier(forall, x, Box::new(body)),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(matches!(formula.formula_type, FormulaType::Quantifier(_, _, _)));
     }
@@ -730,14 +756,15 @@ mod tests {
     #[test]
     fn is_tautology_excluded_middle() {
         // A \/ ¬A is a tautology
-        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let not = logical_symbol::new("\u{00AC}".to_string()).unwrap();
-        let not_a = Formula { formula_type: FormulaType::Combination(not, vec![a2]), value: None };
+        let not_a = Formula { formula_type: FormulaType::Combination(not, vec![a2]), value: None, sub_formula_values: HashMap::new() };
         let or = logical_symbol::new("\u{2228}".to_string()).unwrap();
-        let formula = Formula {
+        let mut formula = Formula {
             formula_type: FormulaType::Combination(or, vec![a1, not_a]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_tautology());
     }
@@ -745,12 +772,13 @@ mod tests {
     #[test]
     fn is_tautology_self_implication() {
         // A => A is a tautology
-        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let implies = logical_symbol::new("=>".to_string()).unwrap();
-        let formula = Formula {
+        let mut formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a1, a2]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_tautology());
     }
@@ -758,16 +786,17 @@ mod tests {
     #[test]
     fn is_tautology_double_negation() {
         // ¬¬A <=> A is a tautology
-        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let not1 = logical_symbol::new("\u{00AC}".to_string()).unwrap();
-        let not_a = Formula { formula_type: FormulaType::Combination(not1, vec![a1]), value: None };
+        let not_a = Formula { formula_type: FormulaType::Combination(not1, vec![a1]), value: None, sub_formula_values: HashMap::new() };
         let not2 = logical_symbol::new("\u{00AC}".to_string()).unwrap();
-        let not_not_a = Formula { formula_type: FormulaType::Combination(not2, vec![not_a]), value: None };
+        let not_not_a = Formula { formula_type: FormulaType::Combination(not2, vec![not_a]), value: None, sub_formula_values: HashMap::new() };
         let iff = logical_symbol::new("<=>".to_string()).unwrap();
-        let formula = Formula {
+        let mut formula = Formula {
             formula_type: FormulaType::Combination(iff, vec![not_not_a, a2]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_tautology());
     }
@@ -775,12 +804,13 @@ mod tests {
     #[test]
     fn is_tautology_conjunction_not_tautology() {
         // A /\ B is not a tautology (false when A=false or B=false)
-        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
         let and = logical_symbol::new("\u{2227}".to_string()).unwrap();
-        let formula = Formula {
+        let mut formula = Formula {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(!formula.is_tautology());
     }
@@ -788,37 +818,42 @@ mod tests {
     #[test]
     fn is_tautology_hypothetical_syllogism() {
         // (A => B) => ((B => C) => (A => C)) is a tautology
-        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let b1 = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
-        let b2 = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
-        let c1 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
-        let c2 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
+        let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let b1 = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let b2 = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let c1 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
+        let c2 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None, sub_formula_values: HashMap::new() };
 
         // A => B
         let a_implies_b = Formula {
             formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a1, b1]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         // B => C
         let b_implies_c = Formula {
             formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![b2, c1]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         // A => C
         let a_implies_c = Formula {
             formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a2, c2]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         // (B => C) => (A => C)
         let inner = Formula {
             formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![b_implies_c, a_implies_c]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         // (A => B) => ((B => C) => (A => C))
-        let formula = Formula {
+        let mut formula = Formula {
             formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a_implies_b, inner]),
             value: None,
+            sub_formula_values: HashMap::new(),
         };
         assert!(formula.is_tautology());
     }

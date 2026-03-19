@@ -94,7 +94,7 @@ impl Parser {
         if self.rest().starts_with('\u{00AC}') {
             self.pos += '\u{00AC}'.len_utf8();
             let sym = logical_symbol::new("\u{00AC}".to_string())?;
-            let body = Formula { formula_type: self.formula()?, value: None };
+            let body = Formula { formula_type: self.formula()?, value: None, sub_formula_values: std::collections::HashMap::new() };
             return Ok(FormulaType::Combination(sym, vec![body]));
         }
         if self.rest().starts_with('(') {
@@ -113,7 +113,7 @@ impl Parser {
         let sym = logical_symbol::new(q.to_string())?;
         let var = self.individual_variable()?;
         self.consume(".")?;
-        let body = Formula { formula_type: self.formula()?, value: None };
+        let body = Formula { formula_type: self.formula()?, value: None, sub_formula_values: std::collections::HashMap::new() };
         Ok(FormulaType::Quantifier(sym, var, Box::new(body)))
     }
 
@@ -128,11 +128,11 @@ impl Parser {
             return Ok(lhs);
         }
         let op = self.binary_connective()?;
-        let rhs = Formula { formula_type: self.formula()?, value: None };
+        let rhs = Formula { formula_type: self.formula()?, value: None, sub_formula_values: std::collections::HashMap::new() };
         self.consume(")")?;
         let sym = logical_symbol::new(op)?;
         Ok(FormulaType::Combination(sym, vec![
-            Formula { formula_type: lhs, value: None },
+            Formula { formula_type: lhs, value: None, sub_formula_values: std::collections::HashMap::new() },
             rhs,
         ]))
     }

@@ -203,12 +203,13 @@ fn main() -> Result<()> {
             match parse_formula(&parse_str) {
                 Err(e) => println!("Invalid formula: {e}"),
                 Ok(ft) => {
-                    let formula = Formula { formula_type: ft, value: None };
+                    let mut formula = Formula { formula_type: ft, value: None, sub_formula_values: std::collections::HashMap::new() };
                     if formula.is_tautology() {
                         println!("Tautology: {value}");
                     } else {
                         println!("Not a tautology: {value}");
                     }
+                    println!("ProofTable: {:?}", formula.sub_formula_values);
                 }
             }
         }
@@ -473,7 +474,7 @@ mod tests {
         match parse_formula(value) {
             Err(e) => format!("Invalid formula: {e}"),
             Ok(ft) => {
-                let formula = Formula { formula_type: ft, value: None };
+                let mut formula = Formula { formula_type: ft, value: None, sub_formula_values: std::collections::HashMap::new() };
                 if formula.is_tautology() {
                     format!("Tautology: {value}")
                 } else {
