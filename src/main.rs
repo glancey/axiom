@@ -212,9 +212,6 @@ fn main() -> Result<()> {
                     } else {
                         println!("Not a tautology: {value}");
                     }
-                    //println!("Assignments: {:?}", proof.values);
-                    //println!("Evaluations: {:?}", proof.evals);
-                    //proof_table.proofs.push(proof);
                 }
             }
 
@@ -483,7 +480,7 @@ mod tests {
             Err(e) => format!("Invalid formula: {e}"),
             Ok(ft) => {
                 let formula = Formula { formula_type: ft, value: None };
-                let mut proofs = Proof::new();
+                let mut proofs = ProofTable::new();
                 if formula.is_tautology(&mut proofs) {
                     format!("Tautology: {value}")
                 } else {
