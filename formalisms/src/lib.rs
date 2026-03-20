@@ -1,6 +1,9 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
+pub mod proofs;
+use proofs::Proofs;
+
 /// A variable ranging over individuals in the domain.
 /// Must be a single uppercase letter (A–Z), optionally followed by one or more apostrophes.
 /// Examples: `A`, `B'`, `X'''`
@@ -326,7 +329,7 @@ impl Formula {
 
     /// Return true if the formula holds under every possible truth assignment of its variables.
     /// Prints each assignment and its evaluation result, including sub-formula results.
-    pub fn is_tautology(&self) -> bool {
+    pub fn is_tautology(&self, proofs: &mut Proofs) -> bool {
         let vars = self.collect_variables();
         let n = vars.len();
         for mask in 0u64..(1u64 << n) {
@@ -339,6 +342,7 @@ impl Formula {
             sorted.sort_by_key(|(k, _)| *k);
             let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
             println!("assignment: [{}]", row.join(", "));
+            proofs.values.push(assignment.clone());
             let result = self.evaluate_verbose(&assignment);
             println!("result => {}", result);
             if !result {
@@ -739,7 +743,7 @@ mod tests {
             formula_type: FormulaType::Combination(or, vec![a1, not_a]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut Proofs::new()));
     }
 
     #[test]
@@ -752,7 +756,7 @@ mod tests {
             formula_type: FormulaType::Combination(implies, vec![a1, a2]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut Proofs::new()));
     }
 
     #[test]
@@ -769,7 +773,7 @@ mod tests {
             formula_type: FormulaType::Combination(iff, vec![not_not_a, a2]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut Proofs::new()));
     }
 
     #[test]
@@ -782,7 +786,7 @@ mod tests {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
         };
-        assert!(!formula.is_tautology());
+        assert!(!formula.is_tautology(&mut Proofs::new()));
     }
 
     #[test]
@@ -820,7 +824,7 @@ mod tests {
             formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a_implies_b, inner]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut Proofs::new()));
     }
 
 }

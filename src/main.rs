@@ -1,3 +1,4 @@
+use formalisms::proofs::Proofs;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use formalisms::{
@@ -198,17 +199,21 @@ fn main() -> Result<()> {
             }
         }
         Commands::TautologicalProof { value } => {
+            let mut proofs = Proofs::new();
             let normalized = normalize_formula(&value);
             let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
+            println!("Formula to proof: {}", parse_str);
             match parse_formula(&parse_str) {
                 Err(e) => println!("Invalid formula: {e}"),
                 Ok(ft) => {
                     let formula = Formula { formula_type: ft, value: None };
-                    if formula.is_tautology() {
+                    if formula.is_tautology(&mut proofs) {
                         println!("Tautology: {value}");
                     } else {
                         println!("Not a tautology: {value}");
                     }
+                    println!("Assignments: {:?}", proofs.values);
+                    
                 }
             }
         }
@@ -474,7 +479,8 @@ mod tests {
             Err(e) => format!("Invalid formula: {e}"),
             Ok(ft) => {
                 let formula = Formula { formula_type: ft, value: None };
-                if formula.is_tautology() {
+                let mut proofs = Proofs::new();
+                if formula.is_tautology(&mut proofs) {
                     format!("Tautology: {value}")
                 } else {
                     format!("Not a tautology: {value}")
