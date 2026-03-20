@@ -1,4 +1,4 @@
-use formalisms::proofs::Proofs;
+use formalisms::proofs::ProofTable;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use formalisms::{
@@ -199,7 +199,7 @@ fn main() -> Result<()> {
             }
         }
         Commands::TautologicalProof { value } => {
-            let mut proofs = Proofs::new();
+            let mut proof_table = ProofTable::new();
             let normalized = normalize_formula(&value);
             let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
             println!("Formula to proof: {}", parse_str);
@@ -207,16 +207,19 @@ fn main() -> Result<()> {
                 Err(e) => println!("Invalid formula: {e}"),
                 Ok(ft) => {
                     let formula = Formula { formula_type: ft, value: None };
-                    if formula.is_tautology(&mut proofs) {
+                    if formula.is_tautology(&mut proof_table) {
                         println!("Tautology: {value}");
                     } else {
                         println!("Not a tautology: {value}");
                     }
-                    println!("Assignments: {:?}", proofs.values);
-                    println!("Evaluations: {:?}", proofs.evals);
-                    
+                    //println!("Assignments: {:?}", proof.values);
+                    //println!("Evaluations: {:?}", proof.evals);
+                    //proof_table.proofs.push(proof);
                 }
             }
+
+            println!("Proof table: {:#?}", proof_table);
+            
         }
         Commands::Glossary => {
             println!("individual_variable");
@@ -480,7 +483,7 @@ mod tests {
             Err(e) => format!("Invalid formula: {e}"),
             Ok(ft) => {
                 let formula = Formula { formula_type: ft, value: None };
-                let mut proofs = Proofs::new();
+                let mut proofs = Proof::new();
                 if formula.is_tautology(&mut proofs) {
                     format!("Tautology: {value}")
                 } else {
