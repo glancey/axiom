@@ -199,7 +199,7 @@ fn main() -> Result<()> {
             let mut proof_table = ProofTable::new();
             let normalized = normalize_formula(&value);
             let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
-            println!("Formula to proof: {}", parse_str);
+            println!("Formula to prove: {}", parse_str);
             match parse_formula(&parse_str) {
                 Err(e) => println!("Invalid formula: {e}"),
                 Ok(ft) => {
