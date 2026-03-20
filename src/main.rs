@@ -213,6 +213,7 @@ fn main() -> Result<()> {
                         println!("Not a tautology: {value}");
                     }
                     println!("Assignments: {:?}", proofs.values);
+                    println!("Evaluations: {:?}", proofs.evals);
                     
                 }
             }

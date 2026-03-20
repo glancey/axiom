@@ -292,23 +292,25 @@ impl Formula {
 
     /// Recursively evaluates and prints the truth value of each sub-formula
     /// (Terms, Relations, and Combinations) under the given assignment.
-    fn evaluate_verbose(&self, assignment: &HashMap<String, bool>) -> bool {
+    fn evaluate_verbose(&self, assignment: &HashMap<String, bool>, proofs: &mut Proofs) -> bool {
         match &self.formula_type {
             FormulaType::Term(t) => {
                 let val = match &t.term_type {
                     TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
                     _ => self.value.unwrap_or(false),
                 };
-                println!("  {} = {}", self.display_str(), val);
+                //println!("  {} = {}", self.display_str(), val);
+                proofs.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
             FormulaType::Relation(_, _) => {
                 let val = self.value.unwrap_or(false);
-                println!("  {} = {}", self.display_str(), val);
+                //println!("  {} = {}", self.display_str(), val);
+                proofs.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
             FormulaType::Combination(_, formulas) => {
-                let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment)).collect();
+                let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment, proofs)).collect();
                 let val = match &self.formula_type {
                     FormulaType::Combination(sym, _) => match sym.0.as_str() {
                         "\u{2227}" => sub_results.iter().all(|&v| v),
@@ -320,10 +322,11 @@ impl Formula {
                     },
                     _ => unreachable!(),
                 };
-                println!("  {} = {}", self.display_str(), val);
+                //println!("  {} = {}", self.display_str(), val);
+                proofs.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
-            FormulaType::Quantifier(_, _, body) => body.evaluate_verbose(assignment),
+            FormulaType::Quantifier(_, _, body) => body.evaluate_verbose(assignment, proofs),
         }
     }
 
@@ -340,11 +343,11 @@ impl Formula {
                 .collect();
             let mut sorted: Vec<(&String, &bool)> = assignment.iter().collect();
             sorted.sort_by_key(|(k, _)| *k);
-            let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
-            println!("assignment: [{}]", row.join(", "));
+            //let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            //println!("assignment: [{}]", row.join(", "));
             proofs.values.push(assignment.clone());
-            let result = self.evaluate_verbose(&assignment);
-            println!("result => {}", result);
+            let result = self.evaluate_verbose(&assignment, proofs);
+            //println!("result => {}", result);
             if !result {
                 return false;
             }
