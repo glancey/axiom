@@ -7,7 +7,6 @@ use formalisms::{
 };
 use axiom_parser::parse_formula;
 use tabled::{builder::Builder, settings::Style};
-use tabled::assert::assert_table;
 
 
 #[derive(Parser)]
