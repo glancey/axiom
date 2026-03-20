@@ -207,9 +207,7 @@ cargo test --workspace
 ---
 
 ## To Do
-
-1. Create and display a truth table for proven tautologies.
-2. Create and display a formal proof ala Kalish and Montague in their book, *Logic*.
+Create and display a formal proof ala Kalish and Montague in their book, *Logic*.
 
 ---
 
