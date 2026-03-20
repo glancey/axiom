@@ -1,3 +1,4 @@
+use formalisms::proofs::ProofTable;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use formalisms::{
@@ -5,11 +6,13 @@ use formalisms::{
     relation_symbol, term, Formula,
 };
 use axiom_parser::parse_formula;
+use tabled::{builder::Builder, settings::Style};
+use tabled::assert::assert_table;
 
 
 #[derive(Parser)]
 #[command(name = "axiom")]
-#[command(about = "A CLI tool", long_about = None)]
+#[command(about = "A formal logic CLI for validating, parsing, and proving logical formulas", long_about = None)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -18,43 +21,61 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Say hello
+    /// Greet a user by name
     Hello {
-        /// Name to greet
+        /// Name to greet (defaults to "world")
         #[arg(short, long, default_value = "world")]
         name: String,
     },
-    /// Validate a string
+    /// Validate a language construct (individual variable, constant, logical/operation/relation symbol, or term)
     Validate {
-        /// String to validate
+        /// The string representation of the construct to validate
         value: String,
-        /// Optional array of arguments (required for operation_symbol; its length sets the rank)
+        /// Additional arguments for operation_symbol validation; the number of args sets the rank
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
-    /// Print descriptions of all language constructs
+    /// Print definitions and examples for all supported language constructs
     Glossary,
-    /// Check if a term is a valid formula 
+    /// Parse a string as a formula and report whether it is well-formed
     CheckFormula {
-        /// Term to build the formula from
+        /// The string to parse as a formula
         value: String,
     },
-    /// Parse a formula and return Ok if it is a tautology (is_true with empty context)
+    /// Parse a formula and build a proof table showing whether it is a tautology
     TautologicalProof {
-        /// Formula to evaluate
+        /// The formula to evaluate across all truth assignments
         value: String,
     },
 }
 
+/// Renders a `ProofTable` as a modern-styled table printed to stdout.
+/// Extracts column headers from the eval keys of the first proof, then
+/// pushes each proof's eval values as a row.
+fn build_proof(proof_table: ProofTable) {
+    let all_keys: Vec<&String> = proof_table.proofs[0].evals.iter()
+        .flat_map(|eval| eval.keys())
+        .collect();
+    let mut builder = Builder::with_capacity(all_keys.len(), proof_table.proofs.len());
+    builder.push_record(all_keys);
 
-/// Parses a string of the form `O(a1, a2, ..., an)` into an [`operation_symbol`] of rank n
-/// and the corresponding `Vec<String>` of argument names.
-///
-/// Returns an error if the string is not well-formed, the argument list is empty,
-/// or the symbol name is invalid.
-/// Normalizes natural-language negation into `¬` before parsing:
+    for proof in proof_table.proofs.iter() {
+        let all_values: Vec<String> = proof.evals.iter()
+            .flat_map(|v| v.values())
+            .map(|b| b.to_string())
+            .collect();
+        builder.push_record(all_values);
+    }
+
+    let mut table = builder.build();
+    table.with(Style::modern());
+    println!("{table}");
+}
+
+/// Normalizes natural-language negation into the `¬` symbol before parsing.
 /// - `not(expr)` → `¬(expr)`
 /// - `notX` where X is an uppercase ASCII letter → `¬X`
+/// All other input is passed through unchanged.
 fn normalize_formula(s: &str) -> String {
     let mut result = String::new();
     let mut i = 0;
@@ -82,6 +103,8 @@ fn normalize_formula(s: &str) -> String {
     result
 }
 
+/// Parses a string of the form `name(arg1, arg2, ...)` into an `operation_symbol`
+/// and its argument list. Returns an error if the parentheses or arguments are missing.
 fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
     let s = s.trim();
     let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in operation symbol"))?;
@@ -198,19 +221,24 @@ fn main() -> Result<()> {
             }
         }
         Commands::TautologicalProof { value } => {
+            let mut proof_table = ProofTable::new();
             let normalized = normalize_formula(&value);
             let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
+            println!("Formula to proof: {}", parse_str);
             match parse_formula(&parse_str) {
                 Err(e) => println!("Invalid formula: {e}"),
                 Ok(ft) => {
                     let formula = Formula { formula_type: ft, value: None };
-                    if formula.is_tautology() {
+                    if formula.is_tautology(&mut proof_table) {
                         println!("Tautology: {value}");
                     } else {
                         println!("Not a tautology: {value}");
                     }
                 }
             }
+        
+            build_proof(proof_table);
+
         }
         Commands::Glossary => {
             println!("individual_variable");
@@ -474,7 +502,8 @@ mod tests {
             Err(e) => format!("Invalid formula: {e}"),
             Ok(ft) => {
                 let formula = Formula { formula_type: ft, value: None };
-                if formula.is_tautology() {
+                let mut proofs = ProofTable::new();
+                if formula.is_tautology(&mut proofs) {
                     format!("Tautology: {value}")
                 } else {
                     format!("Not a tautology: {value}")

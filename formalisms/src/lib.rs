@@ -1,6 +1,9 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
+pub mod proofs;
+use proofs::{Proof, ProofTable};
+
 /// A variable ranging over individuals in the domain.
 /// Must be a single uppercase letter (A–Z), optionally followed by one or more apostrophes.
 /// Examples: `A`, `B'`, `X'''`
@@ -289,23 +292,25 @@ impl Formula {
 
     /// Recursively evaluates and prints the truth value of each sub-formula
     /// (Terms, Relations, and Combinations) under the given assignment.
-    fn evaluate_verbose(&self, assignment: &HashMap<String, bool>) -> bool {
+    fn evaluate_verbose(&self, assignment: &HashMap<String, bool>, proof: &mut Proof) -> bool {
         match &self.formula_type {
             FormulaType::Term(t) => {
                 let val = match &t.term_type {
                     TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
                     _ => self.value.unwrap_or(false),
                 };
-                println!("  {} = {}", self.display_str(), val);
+                //println!("  {} = {}", self.display_str(), val);
+                proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
             FormulaType::Relation(_, _) => {
                 let val = self.value.unwrap_or(false);
-                println!("  {} = {}", self.display_str(), val);
+                //println!("  {} = {}", self.display_str(), val);
+                proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
             FormulaType::Combination(_, formulas) => {
-                let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment)).collect();
+                let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment, proof)).collect();
                 let val = match &self.formula_type {
                     FormulaType::Combination(sym, _) => match sym.0.as_str() {
                         "\u{2227}" => sub_results.iter().all(|&v| v),
@@ -317,16 +322,17 @@ impl Formula {
                     },
                     _ => unreachable!(),
                 };
-                println!("  {} = {}", self.display_str(), val);
+                //println!("  {} = {}", self.display_str(), val);
+                proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
-            FormulaType::Quantifier(_, _, body) => body.evaluate_verbose(assignment),
+            FormulaType::Quantifier(_, _, body) => body.evaluate_verbose(assignment, proof),
         }
     }
 
     /// Return true if the formula holds under every possible truth assignment of its variables.
     /// Prints each assignment and its evaluation result, including sub-formula results.
-    pub fn is_tautology(&self) -> bool {
+    pub fn is_tautology(&self, proof_table: &mut ProofTable) -> bool {
         let vars = self.collect_variables();
         let n = vars.len();
         for mask in 0u64..(1u64 << n) {
@@ -337,10 +343,13 @@ impl Formula {
                 .collect();
             let mut sorted: Vec<(&String, &bool)> = assignment.iter().collect();
             sorted.sort_by_key(|(k, _)| *k);
-            let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
-            println!("assignment: [{}]", row.join(", "));
-            let result = self.evaluate_verbose(&assignment);
-            println!("result => {}", result);
+            //let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            //println!("assignment: [{}]", row.join(", "));
+            let mut proof = Proof::new();
+            proof.values.push(assignment.clone());
+            proof_table.proofs.push(proof);
+            let result = self.evaluate_verbose(&assignment, proof_table.proofs.last_mut().unwrap());
+            //println!("result => {}", result);
             if !result {
                 return false;
             }
@@ -739,7 +748,7 @@ mod tests {
             formula_type: FormulaType::Combination(or, vec![a1, not_a]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut ProofTable::new()));
     }
 
     #[test]
@@ -752,7 +761,7 @@ mod tests {
             formula_type: FormulaType::Combination(implies, vec![a1, a2]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut ProofTable::new()));
     }
 
     #[test]
@@ -769,7 +778,7 @@ mod tests {
             formula_type: FormulaType::Combination(iff, vec![not_not_a, a2]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut ProofTable::new()));
     }
 
     #[test]
@@ -782,7 +791,7 @@ mod tests {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
         };
-        assert!(!formula.is_tautology());
+        assert!(!formula.is_tautology(&mut ProofTable::new()));
     }
 
     #[test]
@@ -820,7 +829,7 @@ mod tests {
             formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a_implies_b, inner]),
             value: None,
         };
-        assert!(formula.is_tautology());
+        assert!(formula.is_tautology(&mut ProofTable::new()));
     }
 
 }

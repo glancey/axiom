@@ -12,3 +12,4 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 formalisms = { path = "formalisms" }
 axiom_parser = { path = "axiom_parser" }
+tabled = "0.20.0"
