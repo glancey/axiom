@@ -140,6 +140,7 @@ name = "formalisms"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tabled",
 ]
 
 [[package]]

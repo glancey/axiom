@@ -6,7 +6,6 @@ use formalisms::{
     relation_symbol, term, Formula,
 };
 use axiom_parser::parse_formula;
-use tabled::{builder::Builder, settings::Style};
 
 
 #[derive(Parser)]
@@ -46,29 +45,6 @@ enum Commands {
         /// The formula to evaluate across all truth assignments
         value: String,
     },
-}
-
-/// Renders a `ProofTable` as a modern-styled table printed to stdout.
-/// Extracts column headers from the eval keys of the first proof, then
-/// pushes each proof's eval values as a row.
-fn build_proof(proof_table: ProofTable) {
-    let all_keys: Vec<&String> = proof_table.proofs[0].evals.iter()
-        .flat_map(|eval| eval.keys())
-        .collect();
-    let mut builder = Builder::with_capacity(all_keys.len(), proof_table.proofs.len());
-    builder.push_record(all_keys);
-
-    for proof in proof_table.proofs.iter() {
-        let all_values: Vec<String> = proof.evals.iter()
-            .flat_map(|v| v.values())
-            .map(|b| b.to_string())
-            .collect();
-        builder.push_record(all_values);
-    }
-
-    let mut table = builder.build();
-    table.with(Style::modern());
-    println!("{table}");
 }
 
 /// Normalizes natural-language negation into the `¬` symbol before parsing.
@@ -236,7 +212,7 @@ fn main() -> Result<()> {
                 }
             }
         
-            build_proof(proof_table);
+            proof_table.build_table();
 
         }
         Commands::Glossary => {

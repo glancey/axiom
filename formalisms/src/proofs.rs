@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use tabled::{builder::Builder, settings::Style};
 
 pub struct Proof {
     pub values: Vec<HashMap<String, bool>>,
@@ -33,6 +34,26 @@ impl ProofTable {
         Self {
             proofs: Vec::new(),
         }
+    }
+
+    pub fn build_table(self) {
+        let all_keys: Vec<&String> = self.proofs[0].evals.iter()
+            .flat_map(|eval| eval.keys())
+            .collect();
+        let mut builder = Builder::with_capacity(all_keys.len(), self.proofs.len());
+        builder.push_record(all_keys);
+
+        for proof in self.proofs.iter() {
+            let all_values: Vec<String> = proof.evals.iter()
+                .flat_map(|v| v.values())
+                .map(|b| b.to_string())
+                .collect();
+            builder.push_record(all_values);
+        }
+
+        let mut table = builder.build();
+        table.with(Style::modern());
+        println!("{table}");
     }
 }
 
