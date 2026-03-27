@@ -1,4 +1,5 @@
 use formalisms::proofs::ProofTable;
+use formalisms::derivations::Argument;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use formalisms::{
@@ -44,6 +45,12 @@ enum Commands {
     TautologicalProof {
         /// The formula to evaluate across all truth assignments
         value: String,
+    },
+    /// Validate a logical argument: build proof tables for premises and conclusion
+    ValidateArgument {
+        /// Premises separated by ' . ' and conclusion after ' :: ', e.g. "(P => notQ) . P :: notQ"
+        #[arg(trailing_var_arg = true)]
+        formulas: Vec<String>,
     },
 }
 
@@ -234,6 +241,67 @@ fn main() -> Result<()> {
             proof_table.build_table();
 
         }
+        Commands::ValidateArgument { formulas } => {
+            let input = formulas.join(" ");
+            let (premises_str, conclusion_str) = match input.split_once(" :: ") {
+                Some((p, c)) => (p, c),
+                None => {
+                    println!("Expected format: <premise> . <premise> :: <conclusion>");
+                    return Ok(());
+                }
+            };
+
+            let normalized_premises: Vec<String> = premises_str.split(" . ")
+                .map(|p| normalize_formula(p.trim()).to_string())
+                .collect();
+            let normalized_conclusion = normalize_formula(conclusion_str.trim()).to_string();
+            println!("Validate: [{}] => {}", normalized_premises.join(" . "), normalized_conclusion);
+
+            let mut premises = Vec::new();
+            for part in premises_str.split(" . ") {
+                let normalized = normalize_formula(part.trim());
+                let parse_str = if !normalized.starts_with('(') {
+                    format!("({normalized})")
+                } else {
+                    normalized.clone()
+                };
+                match parse_formula(&parse_str) {
+                    Err(e) => {
+                        println!("Invalid premise '{}': {e}", part.trim());
+                        return Ok(());
+                    }
+                    Ok(ft) => premises.push(Formula { formula_type: ft, value: Some(true) }),
+                }
+            }
+            if premises.is_empty() {
+                println!("No premises provided.");
+                return Ok(());
+            }
+            let normalized = normalize_formula(conclusion_str.trim());
+            let parse_str = if !normalized.starts_with('(') {
+                format!("({normalized})")
+            } else {
+                normalized.clone()
+            };
+            let conclusion = match parse_formula(&parse_str) {
+                Ok(ft) => Formula { formula_type: ft, value: None },
+                Err(e) => {
+                    println!("Invalid conclusion '{}': {e}", conclusion_str.trim());
+                    return Ok(());
+                }
+            };
+            let arg = Argument { premises, conclusion };
+            println!("Premises ---------------------------------");
+            arg.build_premise_tables();
+
+            println!("Conclusion =================================");
+            let valid = arg.build_conclusion_table();
+            if valid {
+                println!("Argument is valid.");
+            } else {
+                println!("Argument is not valid: the conclusion is false for some assignment where all premises are true.");
+            }
+        }
         Commands::Glossary => {
             println!("individual_variable");
             println!("  A variable ranging over individuals in the domain.");
@@ -266,6 +334,12 @@ fn main() -> Result<()> {
             println!();
             println!("Formula");
             println!("  A well-formed formula (wff) of the language.");
+            println!();
+            println!("ValidateArgument");
+            println!("  Validates a logical argument by building proof tables for each premise");
+            println!("  and a truth table for the conclusion under assignments where all premises hold.");
+            println!("  Format: <premise> . <premise> ... :: <conclusion>");
+            println!("  Example: (P => notQ) . P :: notQ");
         }
     }
 

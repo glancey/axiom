@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 
+pub mod derivations;
 pub mod proofs;
 use proofs::{Proof, ProofTable};
 
@@ -292,7 +293,7 @@ impl Formula {
 
     /// Recursively evaluates and prints the truth value of each sub-formula
     /// (Terms, Relations, and Combinations) under the given assignment.
-    fn evaluate_verbose(&self, assignment: &HashMap<String, bool>, proof: &mut Proof) -> bool {
+    pub fn evaluate_verbose(&self, assignment: &HashMap<String, bool>, proof: &mut Proof) -> bool {
         match &self.formula_type {
             FormulaType::Term(t) => {
                 let val = match &t.term_type {
