@@ -191,6 +191,29 @@ pub struct Formula {
     pub value: Option<bool>,
 }
 
+fn eval_connective(sym: &logical_symbol, results: &[bool]) -> bool {
+    match sym.0.as_str() {
+        "\u{2227}" => results.iter().all(|&v| v),
+        "\u{2228}" => results.iter().any(|&v| v),
+        "\u{00AC}" => results.first().map_or(false, |&v| !v),
+        "=>" => results.len() != 2 || !results[0] || results[1],
+        "<=>" => results.len() == 2 && results[0] == results[1],
+        _ => false,
+    }
+}
+
+pub fn all_assignments(vars: &[String]) -> Vec<HashMap<String, bool>> {
+    let n = vars.len();
+    (0u64..(1u64 << n))
+        .map(|mask| {
+            vars.iter()
+                .enumerate()
+                .map(|(i, name)| (name.clone(), (mask >> i) & 1 == 1))
+                .collect()
+        })
+        .collect()
+}
+
 impl Formula {
     /// Evaluates whether this formula is true given a slice of contextual formulas.
     ///
@@ -240,21 +263,10 @@ impl Formula {
                 _ => self.value.unwrap_or(false),
             },
             FormulaType::Relation(_, _) => self.value.unwrap_or(false),
-            FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
-                "\u{2227}" => formulas.iter().all(|f| f.evaluate(assignment)),
-                "\u{2228}" => formulas.iter().any(|f| f.evaluate(assignment)),
-                "\u{00AC}" => formulas.first().map_or(false, |f| !f.evaluate(assignment)),
-                "=>" => {
-                    formulas.len() != 2
-                        || !formulas[0].evaluate(assignment)
-                        || formulas[1].evaluate(assignment)
-                }
-                "<=>" => {
-                    formulas.len() == 2
-                        && formulas[0].evaluate(assignment) == formulas[1].evaluate(assignment)
-                }
-                _ => false,
-            },
+            FormulaType::Combination(sym, formulas) => {
+                let results: Vec<bool> = formulas.iter().map(|f| f.evaluate(assignment)).collect();
+                eval_connective(sym, &results)
+            }
             FormulaType::Quantifier(_, _, body) => body.evaluate(assignment),
         }
     }
@@ -310,19 +322,9 @@ impl Formula {
                 proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
-            FormulaType::Combination(_, formulas) => {
+            FormulaType::Combination(sym, formulas) => {
                 let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment, proof)).collect();
-                let val = match &self.formula_type {
-                    FormulaType::Combination(sym, _) => match sym.0.as_str() {
-                        "\u{2227}" => sub_results.iter().all(|&v| v),
-                        "\u{2228}" => sub_results.iter().any(|&v| v),
-                        "\u{00AC}" => sub_results.first().map_or(false, |&v| !v),
-                        "=>" => sub_results.len() != 2 || !sub_results[0] || sub_results[1],
-                        "<=>" => sub_results.len() == 2 && sub_results[0] == sub_results[1],
-                        _ => false,
-                    },
-                    _ => unreachable!(),
-                };
+                let val = eval_connective(sym, &sub_results);
                 //println!("  {} = {}", self.display_str(), val);
                 proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
@@ -335,13 +337,7 @@ impl Formula {
     /// Prints each assignment and its evaluation result, including sub-formula results.
     pub fn is_tautology(&self, proof_table: &mut ProofTable) -> bool {
         let vars = self.collect_variables();
-        let n = vars.len();
-        for mask in 0u64..(1u64 << n) {
-            let assignment: HashMap<String, bool> = vars
-                .iter()
-                .enumerate()
-                .map(|(i, name)| (name.clone(), (mask >> i) & 1 == 1))
-                .collect();
+        for assignment in all_assignments(&vars) {
             let mut sorted: Vec<(&String, &bool)> = assignment.iter().collect();
             sorted.sort_by_key(|(k, _)| *k);
             //let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -363,21 +359,10 @@ impl Formula {
             FormulaType::Term(_) | FormulaType::Relation(_, _) => {
                 self.value.unwrap_or(false)
             }
-            FormulaType::Combination(sym, formulas) => match sym.0.as_str() {
-                "\u{2227}" => formulas.iter().all(|f| f.is_true(context)),
-                "\u{2228}" => formulas.iter().any(|f| f.is_true(context)),
-                "\u{00AC}" => formulas.first().map_or(false, |f| !f.is_true(context)),
-                "=>" => {
-                    formulas.len() != 2
-                        || !formulas[0].is_true(context)
-                        || formulas[1].is_true(context)
-                }
-                "<=>" => {
-                    formulas.len() == 2
-                        && formulas[0].is_true(context) == formulas[1].is_true(context)
-                }
-                _ => false,
-            },
+            FormulaType::Combination(sym, formulas) => {
+                let results: Vec<bool> = formulas.iter().map(|f| f.is_true(context)).collect();
+                eval_connective(sym, &results)
+            }
             FormulaType::Quantifier(_, _, body) => body.is_true(context),
         }
     }

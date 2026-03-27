@@ -101,18 +101,23 @@ fn normalize_formula(s: &str) -> String {
     result
 }
 
-/// Parses a string of the form `name(arg1, arg2, ...)` into an `operation_symbol`
-/// and its argument list. Returns an error if the parentheses or arguments are missing.
-fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
+/// Parses a string of the form `name(arg1, arg2, ...)` into a name and argument list.
+/// Returns an error if the parentheses or arguments are missing.
+fn parse_symbol_args(s: &str, kind: &str) -> Result<(String, Vec<String>)> {
     let s = s.trim();
-    let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in operation symbol"))?;
+    let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in {kind} symbol"))?;
     let name = s[..paren].trim().to_string();
     let rest = s[paren + 1..].trim();
-    let rest = rest.strip_suffix(')').ok_or_else(|| anyhow::anyhow!("expected ')' at end of operation symbol"))?;
+    let rest = rest.strip_suffix(')').ok_or_else(|| anyhow::anyhow!("expected ')' at end of {kind} symbol"))?;
     let args: Vec<String> = rest.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
     if args.is_empty() {
-        anyhow::bail!("operation_symbol requires at least one argument");
+        anyhow::bail!("{kind}_symbol requires at least one argument");
     }
+    Ok((name, args))
+}
+
+fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
+    let (name, args) = parse_symbol_args(s, "operation")?;
     let rank = args.len() as u32;
     let sym = operation_symbol::new(name, rank)?;
     Ok((sym, args))
@@ -124,15 +129,7 @@ fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
 /// Returns an error if the string is not well-formed, the argument list is empty,
 /// n is not in the range 1–5, or the symbol name is invalid.
 fn parse_relation_symbol(s: &str) -> Result<(relation_symbol, Vec<String>)> {
-    let s = s.trim();
-    let paren = s.find('(').ok_or_else(|| anyhow::anyhow!("expected '(' in relation symbol"))?;
-    let name = s[..paren].trim().to_string();
-    let rest = s[paren + 1..].trim();
-    let rest = rest.strip_suffix(')').ok_or_else(|| anyhow::anyhow!("expected ')' at end of relation symbol"))?;
-    let args: Vec<String> = rest.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
-    if args.is_empty() {
-        anyhow::bail!("relation_symbol requires at least one argument");
-    }
+    let (name, args) = parse_symbol_args(s, "relation")?;
     let rank = args.len() as u32;
     if rank > 5 {
         anyhow::bail!("relation_symbol rank must be 1–5, got {rank}");

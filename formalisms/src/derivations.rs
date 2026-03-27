@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::Formula;
 use crate::proofs::{Proof, ProofTable};
+use crate::all_assignments;
 
 pub struct Argument {
     pub premises: Vec<Formula>,
@@ -11,15 +11,9 @@ impl Argument {
     pub fn build_premise_tables(&self) {
         for premise in self.premises.iter().filter(|p| p.value == Some(true)) {
             let vars = premise.collect_variables();
-            let n = vars.len();
             let mut proof_table = ProofTable::new();
 
-            for mask in 0u64..(1u64 << n) {
-                let assignment: HashMap<String, bool> = vars
-                    .iter()
-                    .enumerate()
-                    .map(|(i, name)| (name.clone(), (mask >> i) & 1 == 1))
-                    .collect();
+            for assignment in all_assignments(&vars) {
                 let mut proof = Proof::new();
                 proof.values.push(assignment.clone());
                 let result = premise.evaluate_verbose(&assignment, &mut proof);
@@ -41,17 +35,10 @@ impl Argument {
         vars.sort();
         vars.dedup();
 
-        let n = vars.len();
         let mut proof_table = ProofTable::new();
         let mut valid = true;
 
-        for mask in 0u64..(1u64 << n) {
-            let assignment: HashMap<String, bool> = vars
-                .iter()
-                .enumerate()
-                .map(|(i, name)| (name.clone(), (mask >> i) & 1 == 1))
-                .collect();
-
+        for assignment in all_assignments(&vars) {
             let all_premises_hold = self.premises.iter()
                 .filter(|p| p.value == Some(true))
                 .all(|p| p.evaluate(&assignment));

@@ -157,19 +157,8 @@ impl Parser {
     /// it is actually a relation name, so the position is reset and the name is re-parsed.
     fn atomic(&mut self) -> Result<FormulaType> {
         self.skip_ws();
-        let start = self.pos;
-        if let Some(c) = self.rest().chars().next() {
-            if c.is_ascii_uppercase() {
-                self.pos += c.len_utf8();
-                while self.rest().starts_with('\'') { self.pos += 1; }
-                let s = self.input[start..self.pos].to_string();
-                self.skip_ws();
-                if !self.rest().starts_with('(') {
-                    let v = individual_variable::new(&s)?;
-                    return Ok(FormulaType::Term(term { term_type: TermType::Variable(v) }));
-                }
-                self.pos = start;
-            }
+        if let Some(v) = self.try_parse_variable()? {
+            return Ok(FormulaType::Term(term { term_type: TermType::Variable(v) }));
         }
         let name = self.name()?;
         self.skip_ws();
@@ -202,19 +191,8 @@ impl Parser {
     /// or a constant (`name`).
     fn term(&mut self) -> Result<term> {
         self.skip_ws();
-        let start = self.pos;
-        if let Some(c) = self.rest().chars().next() {
-            if c.is_ascii_uppercase() {
-                self.pos += c.len_utf8();
-                while self.rest().starts_with('\'') { self.pos += 1; }
-                let s = self.input[start..self.pos].to_string();
-                self.skip_ws();
-                if !self.rest().starts_with('(') {
-                    let v = individual_variable::new(&s)?;
-                    return Ok(term { term_type: TermType::Variable(v) });
-                }
-                self.pos = start;
-            }
+        if let Some(v) = self.try_parse_variable()? {
+            return Ok(term { term_type: TermType::Variable(v) });
         }
         let name = self.name()?;
         self.skip_ws();
@@ -229,6 +207,28 @@ impl Parser {
             let c = individual_constant::new(name)?;
             Ok(term { term_type: TermType::Constant(c) })
         }
+    }
+
+    /// Tries to parse a variable token (uppercase letter + optional primes) not followed by `(`.
+    /// Returns `Ok(Some(v))` and advances `pos` on success.
+    /// Returns `Ok(None)` without advancing if the first char is not uppercase or if the token
+    /// is followed by `(` (which signals a relation/operation name instead).
+    fn try_parse_variable(&mut self) -> Result<Option<individual_variable>> {
+        let start = self.pos;
+        if let Some(c) = self.rest().chars().next() {
+            if c.is_ascii_uppercase() {
+                self.pos += c.len_utf8();
+                while self.rest().starts_with('\'') { self.pos += 1; }
+                let s = self.input[start..self.pos].to_string();
+                self.skip_ws();
+                if !self.rest().starts_with('(') {
+                    let v = individual_variable::new(&s)?;
+                    return Ok(Some(v));
+                }
+                self.pos = start;
+            }
+        }
+        Ok(None)
     }
 
     /// Parses an individual variable token: an uppercase ASCII letter followed by zero
