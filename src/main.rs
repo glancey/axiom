@@ -47,6 +47,22 @@ enum Commands {
     },
 }
 
+/// Normalizes a natural-language logical symbol name into its symbol form.
+/// Returns the mapped symbol string, or the original input if no mapping matches.
+fn normalize_logical_symbol(s: &str) -> &str {
+    match s.trim() {
+        "and"          => "\u{2227}",
+        "or"           => "\u{2228}",
+        "implies"      => "=>",
+        "not"          => "\u{00AC}",
+        "iff"          => "<=>",
+        "for all"      => "\u{2200}",
+        "there exists" => "\u{018E}",
+        "equals"       => "==",
+        other          => other,
+    }
+}
+
 /// Normalizes natural-language negation into the `¬` symbol before parsing.
 /// - `not(expr)` → `¬(expr)`
 /// - `notX` where X is an uppercase ASCII letter → `¬X`
@@ -142,7 +158,10 @@ fn main() -> Result<()> {
 
             let result: Result<String> = match input.trim() {
                 "1" => individual_variable::new(&value).map(|_| format!("individual_variable({value})")),
-                "2" => logical_symbol::new(value.clone()).map(|_| format!("logical_symbol({value})")),
+                "2" => {
+                    let sym = normalize_logical_symbol(&value);
+                    logical_symbol::new(sym.to_string()).map(|_| format!("logical_symbol({sym})"))
+                }
                 "3" => {
                     if value.contains('(') {
                         parse_operation_symbol(&value).map(|(sym, _)| format!("operation_symbol({}, rank={})", sym.symbol, sym.rank))
@@ -257,6 +276,53 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_logical_symbol_and() {
+        assert_eq!(normalize_logical_symbol("and"), "\u{2227}");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_or() {
+        assert_eq!(normalize_logical_symbol("or"), "\u{2228}");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_implies() {
+        assert_eq!(normalize_logical_symbol("implies"), "=>");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_not() {
+        assert_eq!(normalize_logical_symbol("not"), "\u{00AC}");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_iff() {
+        assert_eq!(normalize_logical_symbol("iff"), "<=>");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_for_all() {
+        assert_eq!(normalize_logical_symbol("for all"), "\u{2200}");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_there_exists() {
+        assert_eq!(normalize_logical_symbol("there exists"), "\u{018E}");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_equals() {
+        assert_eq!(normalize_logical_symbol("equals"), "==");
+    }
+
+    #[test]
+    fn normalize_logical_symbol_passthrough() {
+        assert_eq!(normalize_logical_symbol("=>"), "=>");
+        assert_eq!(normalize_logical_symbol("\u{2227}"), "\u{2227}");
+        assert_eq!(normalize_logical_symbol("unknown"), "unknown");
+    }
 
     fn validate(value: &str) -> String {
         match individual_variable::new(value) {
