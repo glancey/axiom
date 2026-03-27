@@ -75,6 +75,7 @@ impl Argument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FormulaType, term, logical_symbol};
 
     fn make_var(name: &str, value: Option<bool>) -> Formula {
         Formula {
