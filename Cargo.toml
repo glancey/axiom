@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "formalisms", "axiom_parser"]
+members = [".", "formalisms", "axiom_parser", "syntalog"]
 
 [package]
 name = "axiom"

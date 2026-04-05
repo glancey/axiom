@@ -230,6 +230,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "syntalog"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "formalisms",
+]
+
+[[package]]
 name = "tabled"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

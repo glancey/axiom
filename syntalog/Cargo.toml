@@ -1,0 +1,8 @@
+[package]
+name = "syntalog"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+formalisms = { path = "../formalisms" }
+anyhow = "1"
