@@ -2,6 +2,9 @@ use formalisms::{individual_variable, operation_symbol, operation, term, TermTyp
 use std::fmt;
 use anyhow::Result;
 
+pub mod parse;
+pub use parse::parse_rule;
+
 /// An `operation_symbol` whose name begins with a lowercase ASCII letter.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq)]
@@ -374,6 +377,102 @@ impl rule {
     }
 }
 
+fn json_term(t: &term) -> String {
+    match &t.term_type {
+        TermType::Variable(v) =>
+            format!(r#"{{"type":"variable","name":"{}"}}"#, v.name),
+        TermType::Constant(c) =>
+            format!(r#"{{"type":"constant","name":"{}"}}"#, c.0.symbol),
+        TermType::Operation(op) => {
+            let args: Vec<String> = op.vars.iter().map(json_term).collect();
+            format!(r#"{{"type":"operation","symbol":"{}","args":[{}]}}"#,
+                op.symbol.symbol, args.join(","))
+        }
+    }
+}
+
+fn json_atom(a: &atom) -> String {
+    let terms: Vec<String> = a.terms.iter().map(json_term).collect();
+    format!(r#"{{"predicate":"{}","terms":[{}]}}"#,
+        a.predicate.0.symbol, terms.join(","))
+}
+
+fn json_literal(lit: &literal) -> String {
+    match lit {
+        literal::positive_literal(a) =>
+            format!(r#"{{"polarity":"positive","atom":{}}}"#, json_atom(a)),
+        literal::negative_literal(p, terms) => {
+            let ts: Vec<String> = terms.iter().map(json_term).collect();
+            format!(r#"{{"polarity":"negative","predicate":"{}","terms":[{}]}}"#,
+                p.0.symbol, ts.join(","))
+        }
+    }
+}
+
+fn json_pretty(s: &str) -> String {
+    let mut out = String::new();
+    let mut depth: usize = 0;
+    let indent = "  ";
+    let mut in_string = false;
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_string {
+            out.push(c);
+            if c == '\\' { i += 1; if i < chars.len() { out.push(chars[i]); } }
+            else if c == '"' { in_string = false; }
+        } else {
+            match c {
+                '"' => { in_string = true; out.push(c); }
+                '{' | '[' => {
+                    depth += 1;
+                    out.push(c);
+                    out.push('\n');
+                    out.push_str(&indent.repeat(depth));
+                }
+                '}' | ']' => {
+                    depth -= 1;
+                    out.push('\n');
+                    out.push_str(&indent.repeat(depth));
+                    out.push(c);
+                }
+                ',' => {
+                    out.push(c);
+                    out.push('\n');
+                    out.push_str(&indent.repeat(depth));
+                }
+                ':' => { out.push(c); out.push(' '); }
+                c if c.is_whitespace() => {}
+                _ => { out.push(c); }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+impl rule {
+    pub fn to_json(&self) -> String {
+        let rule_type = match self.rule_type {
+            RuleType::General        => "General",
+            RuleType::UnitClause     => "UnitClause",
+            RuleType::Goal           => "Goal",
+            RuleType::DefiniteClause => "DefiniteClause",
+            RuleType::HornRule       => "HornRule",
+            RuleType::Fact           => "Fact",
+        };
+        let head: Vec<String> = self.head.iter().map(json_literal).collect();
+        let body: Vec<String> = self.body.iter().map(json_literal).collect();
+        format!(r#"{{"rule_type":"{}","head":[{}],"body":[{}]}}"#,
+            rule_type, head.join(","), body.join(","))
+    }
+
+    pub fn to_json_pretty(&self) -> String {
+        json_pretty(&self.to_json())
+    }
+}
+
 /// A collection of `rule`s forming a logical theory.
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -659,6 +758,13 @@ mod tests {
         let other    = make_atom_2("likes", "A", "B");
         let subs = vec![term::new("alice".to_string(), Some(0), vec![]).unwrap()];
         assert!(self_atom.unifies(subs, &other).is_err());
+    }
+
+    #[test]
+    fn rule_to_json() {
+        let r = crate::parse::parse_rule("happy(A) :- lego_builder(A), enjoys_lego(A)").unwrap();
+        let json = r.to_json();
+        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}]}"#);
     }
 
     #[test]

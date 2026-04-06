@@ -7,6 +7,7 @@ use formalisms::{
     relation_symbol, term, Formula,
 };
 use axiom_parser::parse_formula;
+use syntalog::parse_rule;
 
 
 #[derive(Parser)]
@@ -45,6 +46,20 @@ enum Commands {
     TautologicalProof {
         /// The formula to evaluate across all truth assignments
         value: String,
+    },
+    /// Parse a rule and substitute the given terms for its variables (in appearance order), then pretty-print the result
+    Substitution {
+        /// Comma-separated terms to substitute, e.g. "alice,bob"
+        terms: String,
+        /// The rule string, e.g. "happy(A) :- lego_builder(A)"
+        #[arg(trailing_var_arg = true)]
+        rule: Vec<String>,
+    },
+    /// Parse a rule of the form `h1, …, hn :- b1, …, bm` and print its JSON serialization
+    SerializeRule {
+        /// The rule string, e.g. "happy(A) :- lego_builder(A), enjoys_lego(A)"
+        #[arg(trailing_var_arg = true)]
+        tokens: Vec<String>,
     },
     /// Validate a logical argument: build proof tables for premises and conclusion
     ValidateArgument {
@@ -237,6 +252,32 @@ fn main() -> Result<()> {
         
             proof_table.build_table();
 
+        }
+        Commands::Substitution { terms, rule } => {
+            let rule_str = rule.join(" ");
+            match parse_rule(&rule_str) {
+                Err(e) => println!("Error parsing rule: {e}"),
+                Ok(r) => {
+                    let subs: Result<Vec<formalisms::term>> = terms
+                        .split(',')
+                        .map(|t| formalisms::term::new(t.trim().to_string(), Some(0), vec![]))
+                        .collect();
+                    match subs {
+                        Err(e) => println!("Error parsing terms: {e}"),
+                        Ok(subs) => match r.substitution(subs) {
+                            Err(e) => println!("Error: {e}"),
+                            Ok(r2) => println!("{}", r2.to_json_pretty()),
+                        },
+                    }
+                }
+            }
+        }
+        Commands::SerializeRule { tokens } => {
+            let input = tokens.join(" ");
+            match parse_rule(&input) {
+                Ok(r) => println!("{}", r.to_json_pretty()),
+                Err(e) => println!("Error: {e}"),
+            }
         }
         Commands::ValidateArgument { formulas } => {
             let input = formulas.join(" ");

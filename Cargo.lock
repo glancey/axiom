@@ -66,6 +66,7 @@ dependencies = [
  "axiom_parser",
  "clap",
  "formalisms",
+ "syntalog",
  "tabled",
 ]
 
