@@ -7,7 +7,7 @@ use formalisms::{
     relation_symbol, term, Formula,
 };
 use axiom_parser::parse_formula;
-use syntalog::parse_rule;
+use syntalog::{parse_rule, parse_formula_as_rule};
 
 
 #[derive(Parser)]
@@ -47,17 +47,27 @@ enum Commands {
         /// The formula to evaluate across all truth assignments
         value: String,
     },
-    /// Parse a rule and substitute the given terms for its variables (in appearance order), then pretty-print the result
+    /// Parse a rule and substitute the given terms for its variables (in appearance order), then pretty-print the result.
+    /// Accepts either `h1, …, hn :- b1, …, bm` or the formula form `(b1 and … and bm) => (h1 and … and hn)`
     Substitution {
         /// Comma-separated terms to substitute, e.g. "alice,bob"
         terms: String,
-        /// The rule string, e.g. "happy(A) :- lego_builder(A)"
+        /// The rule string — Prolog style or formula style
         #[arg(trailing_var_arg = true)]
         rule: Vec<String>,
     },
-    /// Parse a rule of the form `h1, …, hn :- b1, …, bm` and print its JSON serialization
+    /// Parse a rule and print its JSON serialization.
+    /// Accepts either `h1, …, hn :- b1, …, bm` or the formula form `(b1 and … and bm) => (h1 and … and hn)`
     SerializeRule {
-        /// The rule string, e.g. "happy(A) :- lego_builder(A), enjoys_lego(A)"
+        /// The rule string — Prolog style or formula style
+        #[arg(trailing_var_arg = true)]
+        tokens: Vec<String>,
+    },
+    /// Parse a rule and validate it as a logical argument: body literals as premises, head literals
+    /// as conclusion. Prints the argument form, checks tautology, then builds the proof table.
+    /// Accepts either `h1, …, hn :- b1, …, bm` or the formula form `(b1 and … and bm) => (h1 and … and hn)`
+    ValidateRule {
+        /// The rule string — Prolog style or formula style
         #[arg(trailing_var_arg = true)]
         tokens: Vec<String>,
     },
@@ -129,6 +139,17 @@ fn parse_symbol_args(s: &str, kind: &str) -> Result<(String, Vec<String>)> {
         anyhow::bail!("{kind}_symbol requires at least one argument");
     }
     Ok((name, args))
+}
+
+/// Normalizes and wraps a formula string in parentheses for parsing.
+fn normalize_for_parse(s: &str) -> String {
+    let n = normalize_formula(s);
+    if !n.starts_with('(') { format!("({n})") } else { n }
+}
+
+/// Parses a rule string in either Prolog style or formula (`=>`) style.
+fn parse_rule_input(s: &str) -> Result<syntalog::rule> {
+    if s.contains("=>") { parse_formula_as_rule(s) } else { parse_rule(s) }
 }
 
 fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
@@ -235,9 +256,8 @@ fn main() -> Result<()> {
         }
         Commands::TautologicalProof { value } => {
             let mut proof_table = ProofTable::new();
-            let normalized = normalize_formula(&value);
-            let parse_str = if !normalized.starts_with('(') { format!("({normalized})") } else { normalized.clone() };
-            println!("Formula to prove: {}", parse_str);
+            let parse_str = normalize_for_parse(&value);
+            println!("Formula to prove: {parse_str}");
             match parse_formula(&parse_str) {
                 Err(e) => println!("Invalid formula: {e}"),
                 Ok(ft) => {
@@ -255,7 +275,7 @@ fn main() -> Result<()> {
         }
         Commands::Substitution { terms, rule } => {
             let rule_str = rule.join(" ");
-            match parse_rule(&rule_str) {
+            match parse_rule_input(&rule_str) {
                 Err(e) => println!("Error parsing rule: {e}"),
                 Ok(r) => {
                     let subs: Result<Vec<formalisms::term>> = terms
@@ -274,9 +294,32 @@ fn main() -> Result<()> {
         }
         Commands::SerializeRule { tokens } => {
             let input = tokens.join(" ");
-            match parse_rule(&input) {
+            match parse_rule_input(&input) {
                 Ok(r) => println!("{}", r.to_json_pretty()),
                 Err(e) => println!("Error: {e}"),
+            }
+        }
+        Commands::ValidateRule { tokens } => {
+            let input = tokens.join(" ");
+            match parse_rule_input(&input) {
+                Err(e) => println!("Error parsing rule: {e}"),
+                Ok(r) => {
+                    let body_str = r.body.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(" . ");
+                    let head_str = r.head.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(" . ");
+                    println!("Validate: {body_str} :: {head_str}");
+                    match r.to_formula() {
+                        Err(e) => println!("Error building formula: {e}"),
+                        Ok(formula) => {
+                            let mut proof_table = ProofTable::new();
+                            if formula.is_tautology(&mut proof_table) {
+                                println!("Tautology: {input}");
+                            } else {
+                                println!("Not a tautology: {input}");
+                            }
+                            proof_table.build_table();
+                        }
+                    }
+                }
             }
         }
         Commands::ValidateArgument { formulas } => {
@@ -297,12 +340,7 @@ fn main() -> Result<()> {
 
             let mut premises = Vec::new();
             for part in premises_str.split(" . ") {
-                let normalized = normalize_formula(part.trim());
-                let parse_str = if !normalized.starts_with('(') {
-                    format!("({normalized})")
-                } else {
-                    normalized.clone()
-                };
+                let parse_str = normalize_for_parse(part.trim());
                 match parse_formula(&parse_str) {
                     Err(e) => {
                         println!("Invalid premise '{}': {e}", part.trim());
@@ -315,13 +353,7 @@ fn main() -> Result<()> {
                 println!("No premises provided.");
                 return Ok(());
             }
-            let normalized = normalize_formula(conclusion_str.trim());
-            let parse_str = if !normalized.starts_with('(') {
-                format!("({normalized})")
-            } else {
-                normalized.clone()
-            };
-            let conclusion = match parse_formula(&parse_str) {
+            let conclusion = match parse_formula(&normalize_for_parse(conclusion_str.trim())) {
                 Ok(ft) => Formula { formula_type: ft, value: None },
                 Err(e) => {
                     println!("Invalid conclusion '{}': {e}", conclusion_str.trim());

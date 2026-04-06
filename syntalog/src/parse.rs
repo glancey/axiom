@@ -1,5 +1,5 @@
 use anyhow::Result;
-use formalisms::{individual_variable, individual_constant, operation_symbol, operation, term, TermType};
+use formalisms::{individual_variable, individual_constant, operation_symbol, operation, term, TermType, FormulaType};
 use crate::{predicate_symbol, atom, literal, rule};
 
 /// Parses a string of the form `h1, …, hn :- b1, …, bm` into a [`rule`].
@@ -70,7 +70,7 @@ impl Parser {
         if self.rest().starts_with(":-") {
             self.pos += 2;
             let body = self.literal_list()?;
-            return Ok(rule::new(head, body));
+            return rule::new(head, body);
         }
         // Unit clause: head only
         rule::unit_clause(head)
@@ -196,6 +196,106 @@ impl Parser {
     }
 }
 
+/// Parses a formula string of the form `(b1 ∧ … ∧ bm) => (h1 ∧ … ∧ hn)` into a [`rule`].
+///
+/// Uses [`axiom_parser::parse_formula`] to consume the formula, then converts the
+/// top-level implication into `head :- body` form. Each conjunction side is
+/// recursively flattened so that nested `∧` chains all become flat literal lists.
+///
+/// # Accepted connective spellings
+/// The `axiom_parser` normalises `" and "` → `∧` before parsing, so both
+/// `(b1 and b2) => h1` and `(b1 ∧ b2) => h1` are accepted.
+///
+/// # Errors
+/// Returns an error if the formula is not a top-level `=>` combination, or if
+/// any operand cannot be converted to a syntalog literal.
+pub fn parse_formula_as_rule(s: &str) -> Result<rule> {
+    // Wrap in outer parens so axiom_parser sees the top-level '=>' as a binary
+    // connective rather than treating the first parenthesised sub-expression as
+    // a complete formula with leftover input.
+    let wrapped = format!("({})", s.trim());
+    let ft = axiom_parser::parse_formula(&wrapped)?;
+    match ft {
+        FormulaType::Combination(sym, mut parts)
+            if sym.symbol() == "=>" && parts.len() == 2 =>
+        {
+            // parts[0] = body conjunction, parts[1] = head conjunction
+            let head_f = parts.remove(1);
+            let body_f = parts.remove(0);
+            let head_lits = flatten_conjunction(head_f.formula_type)?;
+            let body_lits = flatten_conjunction(body_f.formula_type)?;
+            if head_lits.is_empty() {
+                anyhow::bail!("rule head must contain at least one literal");
+            }
+            rule::new(head_lits, body_lits)
+        }
+        _ => anyhow::bail!(
+            "formula must be a top-level implication of the form (body) => (head)"
+        ),
+    }
+}
+
+/// Recursively flattens a `FormulaType` over `∧` into a flat list of literals.
+/// A non-conjunction operand is converted directly via [`formula_type_to_literal`].
+fn flatten_conjunction(ft: FormulaType) -> Result<Vec<literal>> {
+    match ft {
+        FormulaType::Combination(sym, parts) if sym.symbol() == "\u{2227}" => {
+            let mut lits = Vec::new();
+            for f in parts {
+                lits.extend(flatten_conjunction(f.formula_type)?);
+            }
+            Ok(lits)
+        }
+        other => Ok(vec![formula_type_to_literal(other)?]),
+    }
+}
+
+/// Converts a single (non-conjunction) `FormulaType` leaf into a syntalog [`literal`].
+///
+/// - `Relation(r, terms)` → positive literal with predicate `r` applied to `terms`.
+/// - `Term(constant)` → zero-arity positive literal.
+/// - `Combination(¬, [inner])` → negative literal wrapping the inner atom.
+fn formula_type_to_literal(ft: FormulaType) -> Result<literal> {
+    match ft {
+        // Positive: relation atom, e.g. happy(A)
+        FormulaType::Relation(rel_sym, terms) => {
+            let pred = predicate_symbol(rel_sym.0);
+            let a = atom::new(pred, terms)?;
+            Ok(literal::positive_literal(a))
+        }
+        // Positive: zero-arity constant used as a propositional atom, e.g. "sunny"
+        FormulaType::Term(t) => match t.term_type {
+            TermType::Constant(c) => {
+                let pred = predicate_symbol::new(c.0.symbol, 0)?;
+                let a = atom::new(pred, vec![])?;
+                Ok(literal::positive_literal(a))
+            }
+            _ => anyhow::bail!("individual variables cannot appear as bare literals in a rule"),
+        },
+        // Negative: ¬atom
+        FormulaType::Combination(sym, mut parts)
+            if sym.symbol() == "\u{00AC}" && parts.len() == 1 =>
+        {
+            let inner = parts.remove(0);
+            match inner.formula_type {
+                FormulaType::Relation(rel_sym, terms) => {
+                    let pred = predicate_symbol(rel_sym.0);
+                    Ok(literal::negative(pred, terms)?)
+                }
+                FormulaType::Term(t) => match t.term_type {
+                    TermType::Constant(c) => {
+                        let pred = predicate_symbol::new(c.0.symbol, 0)?;
+                        Ok(literal::negative(pred, vec![])?)
+                    }
+                    _ => anyhow::bail!("individual variables cannot appear as bare literals in a rule"),
+                },
+                _ => anyhow::bail!("negation (¬) must wrap an atom, not a compound formula"),
+            }
+        }
+        _ => anyhow::bail!("expected an atom or negated atom, found a compound formula"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +353,62 @@ mod tests {
     #[test]
     fn parse_invalid_uppercase_predicate_is_err() {
         assert!(parse_rule("Happy(A) :- lego_builder(A)").is_err());
+    }
+
+    // ── parse_formula_as_rule ────────────────────────────────────────────────
+
+    #[test]
+    fn formula_single_body_single_head() {
+        // (b(X)) => (h(X))  ≡  h(X) :- b(X)
+        let r = parse_formula_as_rule("(b(X)) => (h(X))").unwrap();
+        assert_eq!(r.head.len(), 1);
+        assert_eq!(r.body.len(), 1);
+        assert!(matches!(r.rule_type, RuleType::General));
+        assert_eq!(r.to_string(), "h(X) :- b(X)");
+    }
+
+    #[test]
+    fn formula_conjunction_body_single_head() {
+        // (lego_builder(A) and enjoys_lego(A)) => (happy(A))
+        let r = parse_formula_as_rule(
+            "(lego_builder(A) and enjoys_lego(A)) => (happy(A))"
+        ).unwrap();
+        assert_eq!(r.head.len(), 1);
+        assert_eq!(r.body.len(), 2);
+        assert_eq!(r.to_string(), "happy(A) :- lego_builder(A), enjoys_lego(A)");
+    }
+
+    #[test]
+    fn formula_conjunction_body_conjunction_head() {
+        // (b1(X) and b2(X)) => (h1(X) and h2(X))
+        let r = parse_formula_as_rule(
+            "(b1(X) and b2(X)) => (h1(X) and h2(X))"
+        ).unwrap();
+        assert_eq!(r.head.len(), 2);
+        assert_eq!(r.body.len(), 2);
+    }
+
+    #[test]
+    fn formula_nested_conjunction_is_flattened() {
+        // ((b1(X) and b2(X)) and b3(X)) => h(X)  →  body has 3 literals
+        let r = parse_formula_as_rule(
+            "((b1(X) and b2(X)) and b3(X)) => (h(X))"
+        ).unwrap();
+        assert_eq!(r.body.len(), 3);
+        assert_eq!(r.head.len(), 1);
+    }
+
+    #[test]
+    fn formula_not_an_implication_is_err() {
+        assert!(parse_formula_as_rule("(A and B)").is_err());
+    }
+
+    #[test]
+    fn formula_negated_body_literal() {
+        // (¬dangerous(A)) => (safe(A))
+        let r = parse_formula_as_rule("(¬dangerous(A)) => (safe(A))").unwrap();
+        assert_eq!(r.body.len(), 1);
+        assert!(matches!(r.body[0], literal::negative_literal(_, _)));
+        assert_eq!(r.to_string(), "safe(A) :- ¬dangerous(A)");
     }
 }
