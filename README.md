@@ -5,10 +5,11 @@ A CLI tool for constructing, validating, and evaluating well-formed formulas (wf
 ## Workspace
 
 | Crate | Role |
-|-------|------|
+| ----- | ---- |
 | `axiom` | CLI entry point |
 | `formalisms` | Core domain types and formula evaluation |
 | `axiom_parser` | Recursive-descent formula parser |
+| `syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
 
 ## Installation
 
@@ -38,7 +39,7 @@ axiom validate <value> [args...]
 
 After running, select a type:
 
-```
+```text
 1. individual_variable
 2. logical_symbol
 3. operation_symbol
@@ -104,6 +105,58 @@ axiom tautological-proof "(not(P and Q) <=> (notP or notQ))"
 
 ---
 
+### `serialize-rule`
+
+Parses a rule string and prints its JSON representation (pretty-printed).
+
+```sh
+axiom serialize-rule <rule>
+```
+
+**Example:**
+
+```sh
+axiom serialize-rule "happy(A) :- lego_builder(A), enjoys_lego(A)"
+```
+
+```json
+{
+  "rule_type": "General",
+  "head": [
+    {
+      "polarity": "positive",
+      "atom": {
+        "predicate": "happy",
+        "terms": [
+          { "type": "variable", "name": "A" }
+        ]
+      }
+    }
+  ],
+  "body": [...]
+}
+```
+
+---
+
+### `substitution`
+
+Parses a rule, substitutes a comma-separated list of terms for the rule's variables (in appearance order), and pretty-prints the resulting rule as JSON.
+
+```sh
+axiom substitution <terms> <rule>
+```
+
+**Example:**
+
+```sh
+axiom substitution "alice,bob" "happy(A,B) :- likes(A,B)"
+```
+
+`subs` must have exactly as many entries as there are distinct variables in the rule.
+
+---
+
 ### `glossary`
 
 Prints descriptions of all language constructs.
@@ -116,19 +169,19 @@ axiom glossary
 
 ## Formula Grammar
 
-```
-formula    := quantifier | negation | combination | atomic
-quantifier := ('∀' | 'Ǝ') variable '.' formula
-negation   := '¬' formula
+```text
+formula     := quantifier | negation | combination | atomic
+quantifier  := ('∀' | 'Ǝ') variable '.' formula
+negation    := '¬' formula
 combination := '(' formula connective formula ')'
-atomic     := variable | relation | constant
-relation   := name '(' term (',' term)* ')'
-term       := variable | constant | operation
-operation  := name '(' term (',' term)* ')'
-constant   := name
-variable   := [A-Z] '\''*
-name       := [a-z][a-zA-Z0-9_]*
-connective := '<=>' | '=>' | '∧' | '∨' | '=='
+atomic      := variable | relation | constant
+relation    := name '(' term (',' term)* ')'
+term        := variable | constant | operation
+operation   := name '(' term (',' term)* ')'
+constant    := name
+variable    := [A-Z] '\''*
+name        := [a-z][a-zA-Z0-9_]*
+connective  := '<=>' | '=>' | '∧' | '∨' | '=='
 ```
 
 Binary combinations must be **fully parenthesized**: `(A => B)`, not `A => B`.
@@ -139,7 +192,7 @@ A single formula in parentheses `(A)` is unwrapped transparently.
 The parser and CLI normalize the following before parsing:
 
 | Input | Normalized |
-|-------|-----------|
+| ----- | ---------- |
 | `for all` | `∀` |
 | `there exists` | `Ǝ` |
 | ` and ` | ` ∧ ` |
@@ -156,7 +209,7 @@ The parser and CLI normalize the following before parsing:
 
 A single uppercase letter, optionally followed by apostrophes.
 
-```
+```text
 A   B'   X'''
 ```
 
@@ -168,7 +221,7 @@ One of the fixed connectives: `∧` `∨` `=>` `¬` `<=>` `∀` `Ǝ` `==` `(` `)
 
 A named symbol of rank m ≥ 0. Cannot be a `logical_symbol` or `individual_variable`.
 
-```
+```text
 f(a, b, c)   →  operation_symbol f of rank 3
 ```
 
@@ -176,7 +229,7 @@ f(a, b, c)   →  operation_symbol f of rank 3
 
 An `operation_symbol` of rank 0 — names a fixed individual.
 
-```
+```text
 socrates   zero   c1
 ```
 
@@ -184,7 +237,7 @@ socrates   zero   c1
 
 An `operation_symbol` of rank 1–5 used to express a relation between individuals.
 
-```
+```text
 rel(a, b)   →  relation_symbol rel of rank 2
 ```
 
@@ -207,6 +260,7 @@ cargo test --workspace
 ---
 
 ## To Do
+
 Create and display a formal proof ala Kalish and Montague in their book, *Logic*.
 
 ---

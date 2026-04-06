@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "formalisms", "axiom_parser"]
+members = [".", "formalisms", "axiom_parser", "syntalog"]
 
 [package]
 name = "axiom"
@@ -12,4 +12,5 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 formalisms = { path = "formalisms" }
 axiom_parser = { path = "axiom_parser" }
+syntalog = { path = "syntalog" }
 tabled = "0.20.0"
