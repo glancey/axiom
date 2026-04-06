@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 formalisms = { path = "../formalisms" }
+axiom_parser = { path = "../axiom_parser" }
 anyhow = "1"

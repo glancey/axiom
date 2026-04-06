@@ -53,6 +53,10 @@ impl logical_symbol {
             anyhow::bail!("not a valid logical symbol: {s}")
         }
     }
+
+    pub fn symbol(&self) -> &str {
+        &self.0
+    }
 }
 
 /// A named symbol used to build terms and relations.
@@ -365,6 +369,64 @@ impl Formula {
             }
             FormulaType::Quantifier(_, _, body) => body.is_true(context),
         }
+    }
+}
+
+/// A rule in the form `h1, ..., hn :- b1, ..., bm`,
+/// equivalent to the `Formula`: `(b1 ∧ ... ∧ bm) => (h1 ∧ ... ∧ hn)`.
+///
+/// - `head` — the conclusions (h1 … hn); must be non-empty.
+/// - `body` — the premises   (b1 … bm); may be empty (fact / unconditional assertion).
+///
+/// Call [`rule::to_formula`] to obtain the corresponding `FormulaType::Combination`.
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub struct rule {
+    pub head: Vec<Formula>,
+    pub body: Vec<Formula>,
+}
+
+impl rule {
+    pub fn new(head: Vec<Formula>, body: Vec<Formula>) -> Result<Self> {
+        if head.is_empty() {
+            anyhow::bail!("rule head must contain at least one formula");
+        }
+        Ok(rule { head, body })
+    }
+
+    /// Converts this rule into its logically equivalent `Formula`.
+    ///
+    /// - If the body is non-empty the result is
+    ///   `FormulaType::Combination("=>", [body_conj, head_conj])`.
+    /// - If the body is empty the rule is an unconditional fact and the result
+    ///   is just `head_conj` (no implication wrapping needed).
+    pub fn to_formula(self) -> Result<Formula> {
+        // Build head conjunction: h1 ∧ ... ∧ hn
+        let head_formula = if self.head.len() == 1 {
+            self.head.into_iter().next().unwrap()
+        } else {
+            let and = logical_symbol::new("\u{2227}".to_string())?;
+            Formula { formula_type: FormulaType::Combination(and, self.head), value: None }
+        };
+
+        // Empty body → unconditional assertion of the head
+        if self.body.is_empty() {
+            return Ok(head_formula);
+        }
+
+        // Build body conjunction: b1 ∧ ... ∧ bm
+        let body_formula = if self.body.len() == 1 {
+            self.body.into_iter().next().unwrap()
+        } else {
+            let and = logical_symbol::new("\u{2227}".to_string())?;
+            Formula { formula_type: FormulaType::Combination(and, self.body), value: None }
+        };
+
+        let implies = logical_symbol::new("=>".to_string())?;
+        Ok(Formula {
+            formula_type: FormulaType::Combination(implies, vec![body_formula, head_formula]),
+            value: None,
+        })
     }
 }
 
@@ -816,6 +878,71 @@ mod tests {
             value: None,
         };
         assert!(formula.is_tautology(&mut ProofTable::new()));
+    }
+
+    // ── rule tests ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn rule_empty_head_rejected() {
+        assert!(rule::new(vec![], vec![]).is_err());
+    }
+
+    #[test]
+    fn rule_single_head_single_body_produces_implication() {
+        // h :- b  ≡  b => h
+        let h = Formula { formula_type: FormulaType::Term(term::new("H".to_string(), None, vec![]).unwrap()), value: None };
+        let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let f = rule::new(vec![h], vec![b]).unwrap().to_formula().unwrap();
+        assert!(matches!(f.formula_type, FormulaType::Combination(_, _)));
+        if let FormulaType::Combination(sym, parts) = &f.formula_type {
+            assert_eq!(sym.0, "=>");
+            assert_eq!(parts.len(), 2);
+        }
+    }
+
+    #[test]
+    fn rule_multi_head_multi_body_produces_implication_of_conjunctions() {
+        // h1, h2 :- b1, b2  ≡  (b1 ∧ b2) => (h1 ∧ h2)
+        let h1 = Formula { formula_type: FormulaType::Term(term::new("H".to_string(), None, vec![]).unwrap()), value: None };
+        let h2 = Formula { formula_type: FormulaType::Term(term::new("I".to_string(), None, vec![]).unwrap()), value: None };
+        let b1 = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
+        let b2 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
+        let f = rule::new(vec![h1, h2], vec![b1, b2]).unwrap().to_formula().unwrap();
+        if let FormulaType::Combination(sym, parts) = &f.formula_type {
+            assert_eq!(sym.0, "=>");
+            // both sides are conjunctions
+            assert!(matches!(parts[0].formula_type, FormulaType::Combination(_, _)));
+            assert!(matches!(parts[1].formula_type, FormulaType::Combination(_, _)));
+        } else {
+            panic!("expected Combination");
+        }
+    }
+
+    #[test]
+    fn rule_empty_body_produces_unconditional_head() {
+        // h :-   ≡  h  (no implication wrapper)
+        let h = Formula { formula_type: FormulaType::Term(term::new("H".to_string(), None, vec![]).unwrap()), value: None };
+        let f = rule::new(vec![h], vec![]).unwrap().to_formula().unwrap();
+        // With a single head and no body, the result is just the head Term, not a Combination.
+        assert!(matches!(f.formula_type, FormulaType::Term(_)));
+    }
+
+    #[test]
+    fn rule_is_true_when_body_true_and_head_true() {
+        // body = P (true), head = Q (true) → P => Q should be true
+        let h = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
+        let b = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
+        let f = rule::new(vec![h], vec![b]).unwrap().to_formula().unwrap();
+        assert!(f.is_true(&[]));
+    }
+
+    #[test]
+    fn rule_is_true_when_body_false() {
+        // body = P (false), head = Q (false) → P => Q is vacuously true
+        let h = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(false) };
+        let b = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(false) };
+        let f = rule::new(vec![h], vec![b]).unwrap().to_formula().unwrap();
+        assert!(f.is_true(&[]));
     }
 
 }

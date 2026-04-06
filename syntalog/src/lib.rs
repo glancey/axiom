@@ -1,9 +1,13 @@
-use formalisms::{individual_variable, operation_symbol, operation, term, TermType};
+use formalisms::{
+    individual_variable, individual_constant, logical_symbol, relation_symbol,
+    operation_symbol, operation, term, Formula, FormulaType, TermType,
+};
 use std::fmt;
 use anyhow::Result;
 
 pub mod parse;
 pub use parse::parse_rule;
+pub use parse::parse_formula_as_rule;
 
 /// An `operation_symbol` whose name begins with a lowercase ASCII letter.
 #[allow(non_camel_case_types)]
@@ -181,6 +185,80 @@ impl is_ground for literal {
     }
 }
 
+// ── literal → Formula conversion helpers ────────────────────────────────────
+
+/// Converts a single [`literal`] into a [`Formula`].
+///
+/// - Positive literal with rank 0 predicate → `FormulaType::Term` (individual constant).
+/// - Positive literal with rank 1–5 predicate → `FormulaType::Relation`.
+/// - Negative literal → `FormulaType::Combination(¬, [inner])`.
+///
+/// Returns an error if the predicate rank is 0 < rank ≤ 5 is violated (i.e. rank > 5).
+fn literal_to_formula(lit: &literal) -> Result<Formula> {
+    match lit {
+        literal::positive_literal(a) => predicate_to_formula(&a.predicate, &a.terms),
+        literal::negative_literal(pred, terms) => {
+            let inner = predicate_to_formula(pred, terms)?;
+            let not = logical_symbol::new("\u{00AC}".to_string())?;
+            Ok(Formula { formula_type: FormulaType::Combination(not, vec![inner]), value: None })
+        }
+    }
+}
+
+fn predicate_to_formula(pred: &predicate_symbol, terms: &[term]) -> Result<Formula> {
+    let rank = pred.0.rank;
+    if rank == 0 {
+        let c = individual_constant::new(pred.0.symbol.clone())?;
+        let t = term { term_type: TermType::Constant(c) };
+        Ok(Formula { formula_type: FormulaType::Term(t), value: None })
+    } else {
+        let rel = relation_symbol::new(pred.0.symbol.clone(), rank)
+            .map_err(|_| anyhow::anyhow!(
+                "predicate '{}' has rank {rank} which exceeds the relation_symbol maximum of 5",
+                pred.0.symbol
+            ))?;
+        Ok(Formula { formula_type: FormulaType::Relation(rel, terms.to_vec()), value: None })
+    }
+}
+
+/// Folds a non-empty literal slice into a single conjunction `Formula`.
+/// A single literal is returned as-is (no conjunction wrapper).
+fn literals_to_conjunction(lits: &[literal]) -> Result<Formula> {
+    if lits.is_empty() {
+        anyhow::bail!("cannot build a conjunction formula from an empty literal list");
+    }
+    if lits.len() == 1 {
+        return literal_to_formula(&lits[0]);
+    }
+    let formulas: Vec<Formula> = lits.iter().map(literal_to_formula).collect::<Result<_>>()?;
+    let and = logical_symbol::new("\u{2227}".to_string())?;
+    Ok(Formula { formula_type: FormulaType::Combination(and, formulas), value: None })
+}
+
+/// Builds the `FormulaType::Combination` representation of a rule:
+///
+/// | head | body | formula |
+/// |------|------|---------|
+/// | non-empty | non-empty | `(body₁ ∧ … ∧ bodyₘ) => (head₁ ∧ … ∧ headₙ)` |
+/// | non-empty | empty     | `head₁ ∧ … ∧ headₙ`  (unconditional assertion) |
+/// | empty     | non-empty | `body₁ ∧ … ∧ bodyₘ`  (goal / query to be proved) |
+fn build_rule_formula(head: &[literal], body: &[literal]) -> Result<Formula> {
+    match (head.is_empty(), body.is_empty()) {
+        (false, false) => {
+            let body_f = literals_to_conjunction(body)?;
+            let head_f = literals_to_conjunction(head)?;
+            let implies = logical_symbol::new("=>".to_string())?;
+            Ok(Formula {
+                formula_type: FormulaType::Combination(implies, vec![body_f, head_f]),
+                value: None,
+            })
+        }
+        (false, true) => literals_to_conjunction(head),
+        (true, false) => literals_to_conjunction(body),
+        (true, true) => anyhow::bail!("rule must have at least a head or a body"),
+    }
+}
+
 /// Discriminates the structural form of a `rule`.
 #[derive(Debug, Clone)]
 pub enum RuleType {
@@ -201,6 +279,11 @@ pub enum RuleType {
 /// A clause of the form `h1, …, hn :- b1, …, bm` where each `hi` and `bj`
 /// is a `literal`. The `rule_type` records which structural subclass this
 /// instance belongs to.
+///
+/// Call [`rule::to_formula`] to obtain the corresponding `Formula`:
+/// - General/Definite/Horn: `(b1 ∧ … ∧ bm) => (h1 ∧ … ∧ hn)`
+/// - UnitClause/Fact (no body): `h1 ∧ … ∧ hn`
+/// - Goal (no head): `b1 ∧ … ∧ bm`
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 pub struct rule {
@@ -211,8 +294,8 @@ pub struct rule {
 
 impl rule {
     /// General clause — no structural restrictions.
-    pub fn new(head: Vec<literal>, body: Vec<literal>) -> Self {
-        rule { head, body, rule_type: RuleType::General }
+    pub fn new(head: Vec<literal>, body: Vec<literal>) -> Result<Self> {
+        Ok(rule { head, body, rule_type: RuleType::General })
     }
 
     /// Non-empty head, empty body.
@@ -266,6 +349,11 @@ impl rule {
             anyhow::bail!("fact must be ground: head may not contain individual_variables");
         }
         Ok(rule { head, body: vec![], rule_type: RuleType::Fact })
+    }
+
+    /// Returns the `Formula` representation of this rule.
+    pub fn to_formula(&self) -> Result<Formula> {
+        build_rule_formula(&self.head, &self.body)
     }
 }
 
@@ -371,8 +459,8 @@ impl rule {
                 vars.len(), vars.len(), subs.len()
             );
         }
-        let head = self.head.into_iter().map(|lit| substitute_literal(lit, &vars, &subs)).collect();
-        let body = self.body.into_iter().map(|lit| substitute_literal(lit, &vars, &subs)).collect();
+        let head: Vec<literal> = self.head.into_iter().map(|lit| substitute_literal(lit, &vars, &subs)).collect();
+        let body: Vec<literal> = self.body.into_iter().map(|lit| substitute_literal(lit, &vars, &subs)).collect();
         Ok(rule { head, body, rule_type: self.rule_type })
     }
 }
@@ -406,6 +494,37 @@ fn json_literal(lit: &literal) -> String {
             format!(r#"{{"polarity":"negative","predicate":"{}","terms":[{}]}}"#,
                 p.0.symbol, ts.join(","))
         }
+    }
+}
+
+fn json_formula(f: &Formula) -> String {
+    let value = match f.value {
+        Some(true)  => "true",
+        Some(false) => "false",
+        None        => "null",
+    };
+    let ft = json_formula_type(&f.formula_type);
+    // ft is a JSON object starting with `{`; insert "value" as the first field
+    format!(r#"{{"value":{},{}"#, value, &ft[1..])
+}
+
+fn json_formula_type(ft: &FormulaType) -> String {
+    match ft {
+        FormulaType::Term(t) =>
+            format!(r#"{{"type":"term","term":{}}}"#, json_term(t)),
+        FormulaType::Relation(rel, terms) => {
+            let ts: Vec<String> = terms.iter().map(json_term).collect();
+            format!(r#"{{"type":"relation","symbol":"{}","terms":[{}]}}"#,
+                rel.0.symbol, ts.join(","))
+        }
+        FormulaType::Combination(sym, formulas) => {
+            let fs: Vec<String> = formulas.iter().map(json_formula).collect();
+            format!(r#"{{"type":"combination","connective":"{}","operands":[{}]}}"#,
+                sym.symbol(), fs.join(","))
+        }
+        FormulaType::Quantifier(sym, var, body) =>
+            format!(r#"{{"type":"quantifier","quantifier":"{}","variable":"{}","body":{}}}"#,
+                sym.symbol(), var.name, json_formula(body)),
     }
 }
 
@@ -464,8 +583,11 @@ impl rule {
         };
         let head: Vec<String> = self.head.iter().map(json_literal).collect();
         let body: Vec<String> = self.body.iter().map(json_literal).collect();
-        format!(r#"{{"rule_type":"{}","head":[{}],"body":[{}]}}"#,
-            rule_type, head.join(","), body.join(","))
+        let formula = self.to_formula()
+            .map(|f| json_formula(&f))
+            .unwrap_or_else(|_| "null".to_string());
+        format!(r#"{{"rule_type":"{}","head":[{}],"body":[{}],"formula":{}}}"#,
+            rule_type, head.join(","), body.join(","), formula)
     }
 
     pub fn to_json_pretty(&self) -> String {
@@ -586,7 +708,7 @@ mod tests {
     fn rule_general_with_head_and_body() {
         let head = vec![literal::positive_literal(make_atom("reachable", "a"))];
         let body = vec![literal::positive_literal(make_atom("edge", "a"))];
-        let r = rule::new(head, body);
+        let r = rule::new(head, body).unwrap();
         assert!(matches!(r.rule_type, RuleType::General));
         assert_eq!(r.to_string(), "reachable(a) :- edge(a)");
     }
@@ -698,7 +820,7 @@ mod tests {
     fn rule_with_only_constants_is_ground() {
         let head = vec![literal::positive_literal(make_atom("reachable", "a"))];
         let body = vec![literal::positive_literal(make_atom("edge", "a"))];
-        assert!(rule::new(head, body).is_ground());
+        assert!(rule::new(head, body).unwrap().is_ground());
     }
 
     #[test]
@@ -711,7 +833,7 @@ mod tests {
         let body = vec![literal::positive_literal(
             atom::new(predicate_symbol::new("edge".to_string(), 1).unwrap(), vec![var_a2]).unwrap()
         )];
-        assert!(!rule::new(head, body).is_ground());
+        assert!(!rule::new(head, body).unwrap().is_ground());
     }
 
     #[test]
@@ -764,7 +886,7 @@ mod tests {
     fn rule_to_json() {
         let r = crate::parse::parse_rule("happy(A) :- lego_builder(A), enjoys_lego(A)").unwrap();
         let json = r.to_json();
-        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}]}"#);
+        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}],"formula":{"type":"combination","connective":"=>","operands":[{"type":"combination","connective":"∧","operands":[{"type":"relation","symbol":"lego_builder","terms":[{"type":"variable","name":"A"}]},{"type":"relation","symbol":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}]},{"type":"relation","symbol":"happy","terms":[{"type":"variable","name":"A"}]}]}}"#);
     }
 
     #[test]
@@ -773,7 +895,7 @@ mod tests {
         // variables in appearance order: X, Y
         let head = vec![literal::positive_literal(make_atom_2("likes", "X", "Y"))];
         let body = vec![literal::positive_literal(make_atom_2("knows", "X", "Y"))];
-        let r = rule::new(head, body);
+        let r = rule::new(head, body).unwrap();
 
         let subs = vec![
             term::new("alice".to_string(), Some(0), vec![]).unwrap(),
@@ -788,7 +910,7 @@ mod tests {
     #[test]
     fn substitution_wrong_length_is_err() {
         let head = vec![literal::positive_literal(make_atom_2("likes", "X", "Y"))];
-        let r = rule::new(head, vec![]);
+        let r = rule::new(head, vec![]).unwrap();
         let subs = vec![term::new("alice".to_string(), Some(0), vec![]).unwrap()];
         assert!(r.substitution(subs).is_err());
     }
