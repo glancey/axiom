@@ -9,7 +9,7 @@ use proofs::{Proof, ProofTable};
 /// Must be a single uppercase letter (A–Z), optionally followed by one or more apostrophes.
 /// Examples: `A`, `B'`, `X'''`
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct individual_variable {
     pub name: String,
 }
@@ -61,7 +61,7 @@ impl logical_symbol {
 /// Example: In mathematical terms, an operation, O, of rank 10, would be 
 /// represented as O(a0, a1, a2,... a9).
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct operation_symbol {
     pub symbol: String,
     pub rank: u32,
@@ -81,7 +81,7 @@ impl operation_symbol {
 
 /// A zero-arity `operation_symbol` (rank 0) naming a fixed individual in the domain.
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct individual_constant(pub operation_symbol);
 
 impl individual_constant {
@@ -111,7 +111,7 @@ impl relation_symbol {
 /// Example: In logical terms, an operation of rank m is some process applied to all
 /// the members of an array of size m.
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct operation {
     pub symbol: operation_symbol,
     pub vars: Vec<term>,
@@ -130,7 +130,7 @@ impl operation {
 }
 
 /// Discriminates the three forms a `term` may take.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TermType {
     /// An `individual_variable`.
     Variable(individual_variable),
@@ -143,7 +143,7 @@ pub enum TermType {
 /// A term in the language: either an individual variable, an individual constant,
 /// or an operation symbol of rank m > 0 applied to m sub-terms.
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct term {
     pub term_type: TermType,
 }

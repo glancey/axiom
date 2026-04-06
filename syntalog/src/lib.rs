@@ -1,11 +1,10 @@
 use formalisms::{individual_variable, operation_symbol, operation, term, TermType};
-use std::collections::HashMap;
 use std::fmt;
 use anyhow::Result;
 
 /// An `operation_symbol` whose name begins with a lowercase ASCII letter.
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct predicate_symbol(pub operation_symbol);
 
 impl predicate_symbol {
@@ -21,7 +20,7 @@ impl predicate_symbol {
 /// A formula of the form `p(t1, …, tn)` where `p` is a `predicate_symbol`
 /// of rank `n` and each `ti` is a `term`.
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct atom {
     pub predicate: predicate_symbol,
     pub terms: Vec<term>,
@@ -39,15 +38,49 @@ impl atom {
         }
         Ok(atom { predicate, terms })
     }
+
+    /// Collects the distinct `individual_variable`s in appearance order.
+    pub fn variables(&self) -> Vec<individual_variable> {
+        let mut seen = Vec::new();
+        for t in &self.terms {
+            collect_variables_term(t, &mut seen);
+        }
+        seen
+    }
+
+    /// Substitutes `subs` into both `self` and `other` positionally (the same
+    /// terms into both), then checks whether the results are equal. Requires:
+    /// - `self` and `other` have the same number of distinct variables
+    /// - `subs.len()` == that count
+    /// - `self` and `other` share no variable names
+    pub fn unifies(&self, subs: Vec<term>, other: &atom) -> Result<bool> {
+        let self_vars = self.variables();
+        let other_vars = other.variables();
+        if self_vars.len() != other_vars.len() {
+            anyhow::bail!(
+                "unifies requires equal variable counts, self has {} and other has {}",
+                self_vars.len(), other_vars.len()
+            );
+        }
+        if subs.len() != self_vars.len() {
+            anyhow::bail!(
+                "unifies requires {} term(s), got {}",
+                self_vars.len(), subs.len()
+            );
+        }
+        if self_vars.iter().any(|v| other_vars.contains(v)) {
+            anyhow::bail!("unifies requires self and other to have no shared variable names");
+        }
+        let substituted_self  = substitute_atom(self.clone(),  &self_vars,  &subs);
+        let substituted_other = substitute_atom(other.clone(), &other_vars, &subs);
+        Ok(substituted_self == substituted_other)
+    }
 }
 
 impl fmt::Display for atom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}(", self.predicate.0.symbol)?;
-        for (i, t) in self.terms.iter().enumerate() {
-            if i > 0 { write!(f, ", ")?; }
-            write!(f, "{}", term_name(t))?;
-        }
+        fmt_terms(&self.terms, f)?;
         write!(f, ")")
     }
 }
@@ -58,6 +91,14 @@ fn term_name(t: &term) -> &str {
         TermType::Constant(c) => &c.0.symbol,
         TermType::Operation(op) => &op.symbol.symbol,
     }
+}
+
+fn fmt_terms(terms: &[term], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for (i, t) in terms.iter().enumerate() {
+        if i > 0 { write!(f, ", ")?; }
+        write!(f, "{}", term_name(t))?;
+    }
+    Ok(())
 }
 
 /// An operation is *ground* if none of its vars — at any depth — are
@@ -121,10 +162,7 @@ impl fmt::Display for literal {
             literal::positive_literal(a) => write!(f, "{a}"),
             literal::negative_literal(p, terms) => {
                 write!(f, "¬{}(", p.0.symbol)?;
-                for (i, t) in terms.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
-                    write!(f, "{}", term_name(t))?;
-                }
+                fmt_terms(terms, f)?;
                 write!(f, ")")
             }
         }
@@ -252,47 +290,87 @@ impl is_ground for rule {
     }
 }
 
-fn substitute_term(t: term, subs: &HashMap<individual_variable, term>) -> term {
+fn substitute_term(t: term, vars: &[individual_variable], subs: &[term]) -> term {
     match t.term_type {
         TermType::Variable(ref v) => {
-            match subs.get(v) {
-                Some(replacement) => replacement.clone(),
+            match vars.iter().position(|var| var == v) {
+                Some(i) => subs[i].clone(),
                 None => t,
             }
         }
         TermType::Constant(_) => t,
         TermType::Operation(op) => {
-            let new_vars = op.vars.into_iter().map(|v| substitute_term(v, subs)).collect();
+            let new_vars = op.vars.into_iter().map(|v| substitute_term(v, vars, subs)).collect();
             term { term_type: TermType::Operation(operation { symbol: op.symbol, vars: new_vars }) }
         }
     }
 }
 
-fn substitute_atom(a: atom, subs: &HashMap<individual_variable, term>) -> atom {
+fn substitute_terms(terms: Vec<term>, vars: &[individual_variable], subs: &[term]) -> Vec<term> {
+    terms.into_iter().map(|t| substitute_term(t, vars, subs)).collect()
+}
+
+fn substitute_atom(a: atom, vars: &[individual_variable], subs: &[term]) -> atom {
     atom {
         predicate: a.predicate,
-        terms: a.terms.into_iter().map(|t| substitute_term(t, subs)).collect(),
+        terms: substitute_terms(a.terms, vars, subs),
     }
 }
 
-fn substitute_literal(lit: literal, subs: &HashMap<individual_variable, term>) -> literal {
+fn substitute_literal(lit: literal, vars: &[individual_variable], subs: &[term]) -> literal {
     match lit {
-        literal::positive_literal(a) => literal::positive_literal(substitute_atom(a, subs)),
-        literal::negative_literal(p, terms) => literal::negative_literal(
-            p,
-            terms.into_iter().map(|t| substitute_term(t, subs)).collect(),
-        ),
+        literal::positive_literal(a) => literal::positive_literal(substitute_atom(a, vars, subs)),
+        literal::negative_literal(p, terms) => {
+            literal::negative_literal(p, substitute_terms(terms, vars, subs))
+        }
     }
+}
+
+fn collect_variables_term(t: &term, seen: &mut Vec<individual_variable>) {
+    match &t.term_type {
+        TermType::Variable(v) => {
+            if !seen.contains(v) { seen.push(v.clone()); }
+        }
+        TermType::Constant(_) => {}
+        TermType::Operation(op) => {
+            for v in &op.vars { collect_variables_term(v, seen); }
+        }
+    }
+}
+
+fn collect_variables_literal(lit: &literal, seen: &mut Vec<individual_variable>) {
+    let terms = match lit {
+        literal::positive_literal(a) => &a.terms,
+        literal::negative_literal(_, terms) => terms,
+    };
+    for t in terms { collect_variables_term(t, seen); }
 }
 
 impl rule {
-    /// Returns a new rule with each `individual_variable` replaced by its
-    /// corresponding term in `subs`, keyed by variable name.
-    /// Variables not present in `subs` are left unchanged.
-    pub fn substitution(self, subs: HashMap<individual_variable, term>) -> Self {
-        let head = self.head.into_iter().map(|lit| substitute_literal(lit, &subs)).collect();
-        let body = self.body.into_iter().map(|lit| substitute_literal(lit, &subs)).collect();
-        rule { head, body, rule_type: self.rule_type }
+    /// Collects the distinct `individual_variable`s in the rule in the order
+    /// they first appear, scanning head then body left to right.
+    pub fn variables(&self) -> Vec<individual_variable> {
+        let mut seen = Vec::new();
+        for lit in self.head.iter().chain(self.body.iter()) {
+            collect_variables_literal(lit, &mut seen);
+        }
+        seen
+    }
+
+    /// Returns a new rule with each `individual_variable` replaced by the
+    /// corresponding term in `subs`. `subs` must have exactly as many elements
+    /// as there are distinct variables in the rule (in appearance order).
+    pub fn substitution(self, subs: Vec<term>) -> Result<Self> {
+        let vars = self.variables();
+        if subs.len() != vars.len() {
+            anyhow::bail!(
+                "substitution requires {} term(s) for {} variable(s), got {}",
+                vars.len(), vars.len(), subs.len()
+            );
+        }
+        let head = self.head.into_iter().map(|lit| substitute_literal(lit, &vars, &subs)).collect();
+        let body = self.body.into_iter().map(|lit| substitute_literal(lit, &vars, &subs)).collect();
+        Ok(rule { head, body, rule_type: self.rule_type })
     }
 }
 
@@ -312,8 +390,6 @@ impl clausal_theory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use formalisms::individual_variable;
 
     fn make_atom(name: &str, arg: &str) -> atom {
         let p = predicate_symbol::new(name.to_string(), 1).unwrap();
@@ -540,33 +616,75 @@ mod tests {
     }
 
     #[test]
+    fn unifies_matching_substitution_returns_true() {
+        // likes(X, Y).unifies([alice, bob], likes(A, B)) with subs [alice, bob]
+        // => likes(alice, bob) == likes(alice, bob) => true
+        let self_atom = make_atom_2("likes", "X", "Y");
+        let other    = make_atom_2("likes", "A", "B");
+        let subs = vec![
+            term::new("alice".to_string(), Some(0), vec![]).unwrap(),
+            term::new("bob".to_string(),   Some(0), vec![]).unwrap(),
+        ];
+        assert!(self_atom.unifies(subs, &other).unwrap());
+    }
+
+    #[test]
+    fn unifies_non_matching_substitution_returns_false() {
+        // likes(X, Y) with [alice, bob], hates(A, B) with [alice, bob]
+        // => likes(alice, bob) != hates(alice, bob) => false
+        let self_atom = make_atom_2("likes", "X", "Y");
+        let other    = make_atom_2("hates", "A", "B");
+        let subs = vec![
+            term::new("alice".to_string(), Some(0), vec![]).unwrap(),
+            term::new("bob".to_string(),   Some(0), vec![]).unwrap(),
+        ];
+        assert!(!self_atom.unifies(subs, &other).unwrap());
+    }
+
+    #[test]
+    fn unifies_shared_variable_names_is_err() {
+        // likes(X, Y) and likes(X, Z) share variable X
+        let self_atom = make_atom_2("likes", "X", "Y");
+        let other = make_atom_2("likes", "X", "Z");
+        let subs = vec![
+            term::new("alice".to_string(), Some(0), vec![]).unwrap(),
+            term::new("bob".to_string(),   Some(0), vec![]).unwrap(),
+        ];
+        assert!(self_atom.unifies(subs, &other).is_err());
+    }
+
+    #[test]
+    fn unifies_wrong_subs_length_is_err() {
+        let self_atom = make_atom_2("likes", "X", "Y");
+        let other    = make_atom_2("likes", "A", "B");
+        let subs = vec![term::new("alice".to_string(), Some(0), vec![]).unwrap()];
+        assert!(self_atom.unifies(subs, &other).is_err());
+    }
+
+    #[test]
     fn substitution_replaces_variables() {
         // likes(X, Y) :- knows(X, Y)  →  likes(alice, bob) :- knows(alice, bob)
+        // variables in appearance order: X, Y
         let head = vec![literal::positive_literal(make_atom_2("likes", "X", "Y"))];
         let body = vec![literal::positive_literal(make_atom_2("knows", "X", "Y"))];
         let r = rule::new(head, body);
 
-        let mut subs = HashMap::new();
-        subs.insert(individual_variable::new("X").unwrap(), term::new("alice".to_string(), Some(0), vec![]).unwrap());
-        subs.insert(individual_variable::new("Y").unwrap(), term::new("bob".to_string(), Some(0), vec![]).unwrap());
+        let subs = vec![
+            term::new("alice".to_string(), Some(0), vec![]).unwrap(),
+            term::new("bob".to_string(), Some(0), vec![]).unwrap(),
+        ];
 
-        let r2 = r.substitution(subs);
+        let r2 = r.substitution(subs).unwrap();
         assert_eq!(r2.to_string(), "likes(alice, bob) :- knows(alice, bob)");
         assert!(r2.is_ground());
     }
 
     #[test]
-    fn substitution_leaves_unbound_variables() {
-        // likes(X, Y) with only X bound → likes(alice, Y)
+    fn substitution_wrong_length_is_err() {
         let head = vec![literal::positive_literal(make_atom_2("likes", "X", "Y"))];
-        let r = rule::unit_clause(head).unwrap();
-
-        let mut subs = HashMap::new();
-        subs.insert(individual_variable::new("X").unwrap(), term::new("alice".to_string(), Some(0), vec![]).unwrap());
-
-        let r2 = r.substitution(subs);
-        assert_eq!(r2.to_string(), "likes(alice, Y)");
-        assert!(!r2.is_ground());
+        let r = rule::new(head, vec![]);
+        let subs = vec![term::new("alice".to_string(), Some(0), vec![]).unwrap()];
+        assert!(r.substitution(subs).is_err());
     }
 
     #[test]
