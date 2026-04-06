@@ -9,6 +9,7 @@ A CLI tool for constructing, validating, and evaluating well-formed formulas (wf
 | `axiom` | CLI entry point |
 | `formalisms` | Core domain types and formula evaluation |
 | `axiom_parser` | Recursive-descent formula parser |
+| `syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
 
 ## Installation
 
