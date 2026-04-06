@@ -242,3 +242,9 @@ Example output for `happy(A) :- lego_builder(A), enjoys_lego(A)`:
   ]
 }
 ```
+
+---
+
+## Bibliography
+
+Cropper, Andrew, and Sebastijan Dumančić. "Inductive Logic Programming At 30: A New Introduction." *Journal of Artificial Intelligence Research* 74 (2022): 765–850.
