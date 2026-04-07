@@ -1,9 +1,9 @@
 [package]
-name = "syntalog"
+name = "axiom-syntalog"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 formalisms = { path = "../formalisms" }
-axiom_parser = { path = "../axiom_parser" }
+axiom-parser = { path = "../axiom-parser" }
 anyhow = "1"

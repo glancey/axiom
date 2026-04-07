@@ -2,7 +2,7 @@ use anyhow::Result;
 use formalisms::{
     operation_symbol, relation_symbol,
 };
-use syntalog::{parse_rule, parse_formula_as_rule};
+use axiom_syntalog::{parse_rule, parse_formula_as_rule};
 
 /// Normalizes a natural-language logical symbol name into its symbol form.
 /// Returns the mapped symbol string, or the original input if no mapping matches.
@@ -73,7 +73,7 @@ pub fn normalize_for_parse(s: &str) -> String {
 }
 
 /// Parses a rule string in either Prolog style or formula (`=>`) style.
-pub fn parse_rule_input(s: &str) -> Result<syntalog::rule> {
+pub fn parse_rule_input(s: &str) -> Result<axiom_syntalog::rule> {
     if s.contains("=>") { parse_formula_as_rule(s) } else { parse_rule(s) }
 }
 

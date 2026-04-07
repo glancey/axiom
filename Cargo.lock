@@ -63,10 +63,10 @@ name = "axiom"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axiom_parser",
+ "axiom-parser",
+ "axiom-syntalog",
  "clap",
  "formalisms",
- "syntalog",
  "tabled",
 ]
 
@@ -79,10 +79,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "axiom_parser"
+name = "axiom-parser"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "formalisms",
+]
+
+[[package]]
+name = "axiom-syntalog"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axiom-parser",
  "formalisms",
 ]
 
@@ -236,15 +245,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "syntalog"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axiom_parser",
- "formalisms",
 ]
 
 [[package]]
