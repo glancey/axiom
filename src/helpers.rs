@@ -23,6 +23,7 @@ pub fn normalize_logical_symbol(s: &str) -> &str {
 /// Normalizes natural-language negation into the `¬` symbol before parsing.
 /// - `not(expr)` → `¬(expr)`
 /// - `notX` where X is an uppercase ASCII letter → `¬X`
+///
 /// All other input is passed through unchanged.
 pub fn normalize_formula(s: &str) -> String {
     let mut result = String::new();
@@ -34,7 +35,7 @@ pub fn normalize_formula(s: &str) -> String {
             i += 4;
         } else if s[i..].starts_with("not") {
             let after = s[i + 3..].chars().next();
-            if after.map_or(false, |c| c.is_ascii_uppercase()) {
+            if after.is_some_and(|c| c.is_ascii_uppercase()) {
                 result.push('\u{00AC}');
                 i += 3;
             } else {
