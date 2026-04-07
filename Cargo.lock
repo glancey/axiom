@@ -76,6 +76,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axiom",
+ "axiom-syntalog",
+ "clap",
+ "formalisms",
 ]
 
 [[package]]

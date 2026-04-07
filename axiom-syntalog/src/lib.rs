@@ -352,8 +352,13 @@ impl rule {
     }
 
     /// Returns the `Formula` representation of this rule.
+    /// For `Fact` rules the formula's `value` is set to `Some(true)`.
     pub fn to_formula(&self) -> Result<Formula> {
-        build_rule_formula(&self.head, &self.body)
+        let mut f = build_rule_formula(&self.head, &self.body)?;
+        if matches!(self.rule_type, RuleType::Fact) {
+            f.value = Some(true);
+        }
+        Ok(f)
     }
 }
 
@@ -573,6 +578,10 @@ fn json_pretty(s: &str) -> String {
 
 impl rule {
     pub fn to_json(&self) -> String {
+        self.to_json_valued(None)
+    }
+
+    pub fn to_json_valued(&self, value: Option<bool>) -> String {
         let rule_type = match self.rule_type {
             RuleType::General        => "General",
             RuleType::UnitClause     => "UnitClause",
@@ -584,7 +593,7 @@ impl rule {
         let head: Vec<String> = self.head.iter().map(json_literal).collect();
         let body: Vec<String> = self.body.iter().map(json_literal).collect();
         let formula = self.to_formula()
-            .map(|f| json_formula(&f))
+            .map(|mut f| { f.value = value; json_formula(&f) })
             .unwrap_or_else(|_| "null".to_string());
         format!(r#"{{"rule_type":"{}","head":[{}],"body":[{}],"formula":{}}}"#,
             rule_type, head.join(","), body.join(","), formula)
@@ -592,6 +601,10 @@ impl rule {
 
     pub fn to_json_pretty(&self) -> String {
         json_pretty(&self.to_json())
+    }
+
+    pub fn to_json_pretty_valued(&self, value: Option<bool>) -> String {
+        json_pretty(&self.to_json_valued(value))
     }
 }
 
