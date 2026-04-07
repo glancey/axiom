@@ -71,6 +71,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-indoos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axiom",
+]
+
+[[package]]
 name = "axiom_parser"
 version = "0.1.0"
 dependencies = [
