@@ -24,12 +24,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Greet a user by name
-    Hello {
-        /// Name to greet (defaults to "world")
-        #[arg(short, long, default_value = "world")]
-        name: String,
-    },
     /// Validate a language construct (individual variable, constant, logical/operation/relation symbol, or term)
     Validate {
         /// The string representation of the construct to validate
@@ -86,12 +80,6 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Hello { name } => {
-            match individual_variable::new(&name) {
-                Ok(_) => println!("Hello, {name}!"),
-                Err(_) => println!("Name cannot be empty."),
-            }
-        }
         Commands::Validate { value, args } => {
             println!("Select type to validate against:");
             println!("  1. individual_variable");

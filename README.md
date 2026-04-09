@@ -9,7 +9,8 @@ A CLI tool for constructing, validating, and evaluating well-formed formulas (wf
 | `axiom` | CLI entry point |
 | `formalisms` | Core domain types and formula evaluation |
 | `axiom_parser` | Recursive-descent formula parser |
-| `syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
+| `axiom-syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
+| `axiom-indoos` | Inductive logic programming — induces hypotheses from background knowledge and examples |
 
 ## Installation
 
@@ -18,16 +19,6 @@ cargo build --release
 ```
 
 ## Commands
-
-### `hello`
-
-Greets a name, validating it as an `individual_variable`.
-
-```sh
-axiom hello --name X
-```
-
----
 
 ### `validate`
 
@@ -101,6 +92,118 @@ axiom tautological-proof "P=>Q"
 
 axiom tautological-proof "(not(P and Q) <=> (notP or notQ))"
 # Tautology: (not(P and Q) <=> (notP or notQ))
+```
+
+---
+
+## axiom-syntalog
+
+`axiom-syntalog` provides clausal logic — rules, atoms, literals, and substitution. Full documentation is in [axiom-syntalog/SYNTALOG.md](axiom-syntalog/SYNTALOG.md).
+
+### Key types
+
+| Type | Description |
+| ---- | ----------- |
+| `predicate_symbol` | A lowercase-named relation symbol |
+| `atom` | `p(t1, ..., tn)` — a predicate applied to terms |
+| `literal` | Positive or negative occurrence of an atom |
+| `rule` | A clause `h1, ..., hn :- b1, ..., bm` with a `RuleType` discriminant |
+| `RuleType` | `General`, `UnitClause`, `Goal`, `DefiniteClause`, `HornRule`, `Fact` |
+
+---
+
+## axiom-indoos
+
+`axiom-indoos` implements Inductive Logic Programming (ILP). Given background knowledge, positive examples, and negative examples as Prolog-style `.pl` files, it induces generalized hypothesis rules that are consistent with the interpretation.
+
+### axiom-indoos Commands
+
+#### `load`
+
+Parses and classifies each line of a `.pl` file.
+
+```sh
+axiom-indoos load <file.pl>
+```
+
+#### `induce`
+
+Induces hypothesis rules from three `.pl` files. Prints the terms, base atoms, interpretation, and induced model.
+
+```sh
+axiom-indoos induce <background.pl> <ex_plus.pl> <ex_minus.pl>
+```
+
+**Example:**
+
+Given these files:
+
+`background.pl`
+
+```prolog
+lego_builder(alice).
+enjoys_lego(alice).
+happy(alice).
+lego_builder(bob).
+```
+
+`ex_plus.pl`
+
+```prolog
+enjoys_lego(claire).
+estate_agent(claire).
+estate_agent(dave).
+```
+
+`ex_minus.pl`
+
+```prolog
+happy(bob).
+```
+
+Running:
+
+```sh
+axiom-indoos induce background.pl ex_plus.pl ex_minus.pl
+```
+
+Produces:
+
+```text
+Terms: {"alice", "bob", "claire", "dave"}
+
+Base: ["enjoys_lego(alice)", "enjoys_lego(bob)", ..., "lego_builder(dave)"]
+
+Interpretation: ["enjoys_lego(alice)", "enjoys_lego(claire)", "estate_agent(claire)",
+                 "estate_agent(dave)", "happy(alice)", "lego_builder(alice)", "lego_builder(bob)"]
+
+Model:
+  enjoys_lego(A) :- happy(A), lego_builder(A)
+  happy(A) :- enjoys_lego(A), lego_builder(A)
+  lego_builder(A) :- enjoys_lego(A), happy(A)
+```
+
+**How it works:**
+
+1. **Terms** — ground constants found in the background file.
+2. **Base** — all ground atoms formed by substituting each term into every predicate symbol across all three files.
+3. **Interpretation** — members of base that appear as literals in the background or positive examples.
+4. **Model** — generalized rules `h :- b1, ..., bn` where at least one ground substitution makes all literals true in the interpretation, and no substitution satisfies the body while the head is false.
+
+#### `prove-induced`
+
+Parses a rule string and builds a proof table for it.
+
+```sh
+axiom-indoos prove-induced "happy(A) :- lego_builder(A)"
+```
+
+#### `induce-rule`
+
+Classifies an atom or literal and builds a unit clause rule from it.
+
+```sh
+axiom-indoos induce-rule "happy(alice)"
 ```
 
 ---
@@ -203,54 +306,6 @@ The parser and CLI normalize the following before parsing:
 
 ---
 
-## Language Constructs
-
-### `individual_variable`
-
-A single uppercase letter, optionally followed by apostrophes.
-
-```text
-A   B'   X'''
-```
-
-### `logical_symbol`
-
-One of the fixed connectives: `∧` `∨` `=>` `¬` `<=>` `∀` `Ǝ` `==` `(` `)`
-
-### `operation_symbol`
-
-A named symbol of rank m ≥ 0. Cannot be a `logical_symbol` or `individual_variable`.
-
-```text
-f(a, b, c)   →  operation_symbol f of rank 3
-```
-
-### `individual_constant`
-
-An `operation_symbol` of rank 0 — names a fixed individual.
-
-```text
-socrates   zero   c1
-```
-
-### `relation_symbol`
-
-An `operation_symbol` of rank 1–5 used to express a relation between individuals.
-
-```text
-rel(a, b)   →  relation_symbol rel of rank 2
-```
-
-### `term`
-
-One of: an `individual_variable`, an `individual_constant`, or an `operation_symbol` of rank m > 0 applied to m sub-terms.
-
-### `Formula`
-
-A well-formed formula (wff). Supports evaluation via `is_true`, `evaluate` (under a truth assignment), and `is_tautology`.
-
----
-
 ## Running Tests
 
 ```sh
@@ -270,6 +325,8 @@ Create and display a formal proof ala Kalish and Montague in their book, *Logic*
 Monk, J. Donald. *Introduction to Set Theory*. McGraw-Hill, Inc., 1969. Library of Congress Card Number 68-20056.
 
 Kalish, Donald, and Richard Montague. *Logic: Techniques of Formal Reasoning*. Harcourt, Brace & World, Inc., 1964. ISBN 0-15-551180-7.
+
+Cropper, Andrew, and Sebastijan Dumančić. "Inductive Logic Programming At 30: A New Introduction." *Journal of Artificial Intelligence Research* 74 (2022): 765–850.
 
 ---
 
