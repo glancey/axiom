@@ -36,19 +36,50 @@ impl ProofTable {
         }
     }
 
-    pub fn build_table(self) {
-        let all_keys: Vec<&String> = self.proofs[0].evals.iter()
-            .flat_map(|eval| eval.keys())
-            .collect();
-        let mut builder = Builder::with_capacity(all_keys.len(), self.proofs.len());
-        builder.push_record(all_keys);
+    pub fn merge(&mut self, other: ProofTable) {
+        self.proofs.extend(other.proofs);
+    }
 
-        for proof in self.proofs.iter() {
-            let all_values: Vec<String> = proof.evals.iter()
-                .flat_map(|v| v.values())
-                .map(|b| b.to_string())
+    /// Injects fixed key-value pairs into every row of every proof in the table.
+    pub fn inject_keys(&mut self, keys: &HashMap<String, bool>) {
+        for proof in &mut self.proofs {
+            for eval in &mut proof.evals {
+                for (k, v) in keys {
+                    eval.insert(k.clone(), *v);
+                }
+            }
+        }
+    }
+
+    pub fn build_table(self) {
+        if self.proofs.is_empty() {
+            return;
+        }
+        // Union of all keys across all proofs, in first-seen order.
+        let mut keys: Vec<String> = Vec::new();
+        for proof in &self.proofs {
+            for eval in &proof.evals {
+                for k in eval.keys() {
+                    if !keys.contains(k) {
+                        keys.push(k.clone());
+                    }
+                }
+            }
+        }
+
+        let mut builder = Builder::new();
+        builder.push_record(keys.clone());
+
+        for proof in &self.proofs {
+            // Flatten all evals for this proof into one combined map.
+            let mut combined: HashMap<String, bool> = HashMap::new();
+            for eval in &proof.evals {
+                combined.extend(eval.clone());
+            }
+            let row: Vec<String> = keys.iter()
+                .map(|k| combined.get(k).map(|b| b.to_string()).unwrap_or_else(|| "-".to_string()))
                 .collect();
-            builder.push_record(all_values);
+            builder.push_record(row);
         }
 
         let mut table = builder.build();

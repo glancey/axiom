@@ -358,6 +358,27 @@ impl Formula {
         true
     }
 
+    /// Recursively sets `value` on all `Relation` and `Term` leaf nodes whose
+    /// display string matches a key in `values`.
+    pub fn set_relation_values(&mut self, values: &std::collections::HashMap<String, bool>) {
+        match &mut self.formula_type {
+            FormulaType::Relation(_, _) | FormulaType::Term(_) => {
+                let key = self.display_str();
+                if let Some(&v) = values.get(&key) {
+                    self.value = Some(v);
+                }
+            }
+            FormulaType::Combination(_, formulas) => {
+                for f in formulas {
+                    f.set_relation_values(values);
+                }
+            }
+            FormulaType::Quantifier(_, _, body) => {
+                body.set_relation_values(values);
+            }
+        }
+    }
+
     pub fn is_true(&self, context: &[Formula]) -> bool {
         match &self.formula_type {
             FormulaType::Term(_) | FormulaType::Relation(_, _) => {

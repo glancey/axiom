@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 axiom = { path = ".." }
+axiom-syntalog = { path = "../axiom-syntalog" }
+clap = { version = "4", features = ["derive"] }
+formalisms = { path = "../formalisms" }
