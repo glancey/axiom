@@ -8,6 +8,7 @@ use anyhow::Result;
 pub mod parse;
 pub use parse::parse_rule;
 pub use parse::parse_formula_as_rule;
+pub use parse::parse_term;
 
 /// An `operation_symbol` whose name begins with a lowercase ASCII letter.
 #[allow(non_camel_case_types)]
@@ -92,20 +93,61 @@ impl fmt::Display for atom {
     }
 }
 
-fn term_name(t: &term) -> &str {
+/// If `t` is a proper Prolog list (`'.'`-chain ending in `[]`), returns its
+/// elements; otherwise returns `None`.
+fn try_collect_list(t: &term) -> Option<Vec<&term>> {
     match &t.term_type {
-        TermType::Variable(v) => &v.name,
-        TermType::Constant(c) => &c.0.symbol,
-        TermType::Operation(op) => &op.symbol.symbol,
+        TermType::Constant(c) if c.0.symbol == "[]" => Some(vec![]),
+        TermType::Operation(op) if op.symbol.symbol == "." && op.vars.len() == 2 => {
+            let mut tail = try_collect_list(&op.vars[1])?;
+            let mut elems = vec![&op.vars[0] as &term];
+            elems.append(&mut tail);
+            Some(elems)
+        }
+        _ => None,
+    }
+}
+
+fn fmt_term(t: &term, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match &t.term_type {
+        TermType::Variable(v) => write!(f, "{}", v.name),
+        TermType::Constant(c) => write!(f, "{}", c.0.symbol),
+        TermType::Operation(op) => {
+            if let Some(elems) = try_collect_list(t) {
+                write!(f, "[")?;
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    fmt_term(e, f)?;
+                }
+                write!(f, "]")
+            } else {
+                write!(f, "{}(", op.symbol.symbol)?;
+                for (i, v) in op.vars.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    fmt_term(v, f)?;
+                }
+                write!(f, ")")
+            }
+        }
     }
 }
 
 fn fmt_terms(terms: &[term], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     for (i, t) in terms.iter().enumerate() {
         if i > 0 { write!(f, ", ")?; }
-        write!(f, "{}", term_name(t))?;
+        fmt_term(t, f)?;
     }
     Ok(())
+}
+
+/// Returns the display string of a [`term`], using list bracket notation for
+/// proper Prolog lists (`'.'`-chains ending in `[]`).
+pub fn term_to_string(t: &term) -> String {
+    struct D<'a>(&'a term);
+    impl fmt::Display for D<'_> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt_term(self.0, f) }
+    }
+    format!("{}", D(t))
 }
 
 /// An operation is *ground* if none of its vars — at any depth — are
@@ -376,7 +418,7 @@ impl fmt::Display for rule {
                 write!(f, "{lit}")?;
             }
         }
-        Ok(())
+        write!(f, ".")
     }
 }
 
@@ -723,7 +765,7 @@ mod tests {
         let body = vec![literal::positive_literal(make_atom("edge", "a"))];
         let r = rule::new(head, body).unwrap();
         assert!(matches!(r.rule_type, RuleType::General));
-        assert_eq!(r.to_string(), "reachable(a) :- edge(a)");
+        assert_eq!(r.to_string(), "reachable(a) :- edge(a).");
     }
 
     #[test]
@@ -731,7 +773,7 @@ mod tests {
         let head = vec![literal::positive_literal(make_atom("loves", "alice"))];
         let r = rule::unit_clause(head).unwrap();
         assert!(matches!(r.rule_type, RuleType::UnitClause));
-        assert_eq!(r.to_string(), "loves(alice)");
+        assert_eq!(r.to_string(), "loves(alice).");
     }
 
     #[test]
@@ -747,7 +789,7 @@ mod tests {
         ];
         let r = rule::goal(body).unwrap();
         assert!(matches!(r.rule_type, RuleType::Goal));
-        assert_eq!(r.to_string(), ":- head(A, B), head(B, A)");
+        assert_eq!(r.to_string(), ":- head(A, B), head(B, A).");
     }
 
     #[test]
@@ -764,7 +806,7 @@ mod tests {
         ];
         let r = rule::definite_clause(head, body).unwrap();
         assert!(matches!(r.rule_type, RuleType::DefiniteClause));
-        assert_eq!(r.to_string(), "qsort(A, B) :- empty(A), empty(B)");
+        assert_eq!(r.to_string(), "qsort(A, B) :- empty(A), empty(B).");
     }
 
     #[test]
@@ -815,7 +857,7 @@ mod tests {
         let head = vec![literal::positive_literal(atom::new(p, terms).unwrap())];
         let r = rule::fact(head).unwrap();
         assert!(matches!(r.rule_type, RuleType::Fact));
-        assert_eq!(r.to_string(), "loves(andrew, laura)");
+        assert_eq!(r.to_string(), "loves(andrew, laura).");
     }
 
     #[test]
@@ -899,7 +941,7 @@ mod tests {
     fn rule_to_json() {
         let r = crate::parse::parse_rule("happy(A) :- lego_builder(A), enjoys_lego(A)").unwrap();
         let json = r.to_json();
-        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}],"formula":{"type":"combination","connective":"=>","operands":[{"type":"combination","connective":"∧","operands":[{"type":"relation","symbol":"lego_builder","terms":[{"type":"variable","name":"A"}]},{"type":"relation","symbol":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}]},{"type":"relation","symbol":"happy","terms":[{"type":"variable","name":"A"}]}]}}"#);
+        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}],"formula":{"value":null,"type":"combination","connective":"=>","operands":[{"value":null,"type":"combination","connective":"∧","operands":[{"value":null,"type":"relation","symbol":"lego_builder","terms":[{"type":"variable","name":"A"}]},{"value":null,"type":"relation","symbol":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}]},{"value":null,"type":"relation","symbol":"happy","terms":[{"type":"variable","name":"A"}]}]}}"#);
     }
 
     #[test]
@@ -916,7 +958,7 @@ mod tests {
         ];
 
         let r2 = r.substitution(subs).unwrap();
-        assert_eq!(r2.to_string(), "likes(alice, bob) :- knows(alice, bob)");
+        assert_eq!(r2.to_string(), "likes(alice, bob) :- knows(alice, bob).");
         assert!(r2.is_ground());
     }
 

@@ -24,8 +24,8 @@ enum Command {
         background: PathBuf,
         /// Path to the positive examples .pl file
         ex_plus: PathBuf,
-        /// Path to the negative examples .pl file
-        ex_minus: PathBuf,
+        /// Path to the negative examples .pl file (optional)
+        ex_minus: Option<PathBuf>,
     },
     /// Parse a rule and build a proof table for it
     ProveInduced {
@@ -56,7 +56,7 @@ fn run() -> Result<()> {
             }
         }
         Command::Induce { background, ex_plus, ex_minus } => {
-            let theory = axiom_indoos::induction::Theory::new(&background, &ex_plus, &ex_minus)?;
+            let theory = axiom_indoos::induction::Theory::new(&background, &ex_plus, ex_minus.as_deref())?;
             println!("Terms: {:?}\n", theory.terms);
             let mut base: Vec<&String> = theory.base.iter().collect();
             base.sort();

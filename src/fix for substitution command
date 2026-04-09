@@ -1,0 +1,3 @@
+There it is. [] is a valid term, so "m,a,c,h,i,n,e,[]" produces 8 valid substitution terms. The user must be including [] in their terms string.
+
+The fix belongs in the Substitution command — use parse_term from axiom-syntalog (which properly understands the full term grammar, including list syntax) instead of formalisms::term::new:

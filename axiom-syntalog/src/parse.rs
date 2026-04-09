@@ -13,10 +13,29 @@ use crate::{predicate_symbol, atom, literal, rule};
 /// literal      := ('¬' | '-' | 'not' ws+) atom | atom
 /// atom         := name '(' term_list ')' | name
 /// term_list    := term (',' term)*
-/// term         := variable | name '(' term_list ')' | name
+/// term         := variable | list | name '(' term_list ')' | name
+/// list         := '[' ']' | '[' term (',' term)* ']'
 /// variable     := [A-Z] '\''*
 /// name         := [a-z][a-zA-Z0-9_]*
 /// ```
+///
+/// List syntax `[t1, …, tn]` desugars to Prolog dot notation:
+/// `'.'(t1, '.'(…, '.'(tn, [])))`.  The empty list `[]` becomes the
+/// individual constant `[]`.
+/// Parses a string as a single [`term`].
+///
+/// Accepts variables (`X`), constants (`alice`), operations (`f(a, b)`),
+/// and list syntax (`[a, b, c]`, `[]`).
+pub fn parse_term(s: &str) -> Result<formalisms::term> {
+    let mut p = Parser::new(s);
+    let t = p.term()?;
+    p.skip_ws();
+    if p.pos < p.input.len() {
+        anyhow::bail!("unexpected input at position {}: {:?}", p.pos, &p.input[p.pos..]);
+    }
+    Ok(t)
+}
+
 pub fn parse_rule(s: &str) -> Result<rule> {
     let mut p = Parser::new(s);
     let r = p.rule()?;
@@ -83,7 +102,7 @@ impl Parser {
             if self.rest().is_empty() || self.rest().starts_with(":-") { break; }
             lits.push(self.literal()?);
             self.skip_ws();
-            if self.rest().starts_with(',') { self.pos += 1; } else { break; }
+            if self.rest().starts_with(',') || self.rest().starts_with('.') { self.pos += 1; } else { break; }
         }
         Ok(lits)
     }
@@ -145,6 +164,9 @@ impl Parser {
 
     fn term(&mut self) -> Result<term> {
         self.skip_ws();
+        if self.rest().starts_with('[') {
+            return self.list_term();
+        }
         if let Some(v) = self.try_parse_variable()? {
             return Ok(term { term_type: TermType::Variable(v) });
         }
@@ -161,6 +183,41 @@ impl Parser {
             let c = individual_constant::new(name)?;
             Ok(term { term_type: TermType::Constant(c) })
         }
+    }
+
+    /// Parses `[t1, …, tn]` and desugars to `'.'(t1, '.'(…, '.'(tn, [])))`.
+    /// The empty list `[]` becomes the individual constant `[]`.
+    fn list_term(&mut self) -> Result<term> {
+        self.consume("[")?;
+        self.skip_ws();
+        if self.rest().starts_with(']') {
+            self.pos += 1;
+            let c = individual_constant::new("[]".to_string())?;
+            return Ok(term { term_type: TermType::Constant(c) });
+        }
+        let mut elems = Vec::new();
+        loop {
+            elems.push(self.term()?);
+            self.skip_ws();
+            if self.rest().starts_with(',') {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        self.consume("]")?;
+        // Build '.'(t1, '.'(t2, ...'.'(tn, [])...)) from right to left.
+        let nil = {
+            let c = individual_constant::new("[]".to_string())?;
+            term { term_type: TermType::Constant(c) }
+        };
+        let mut result = nil;
+        for elem in elems.into_iter().rev() {
+            let sym = operation_symbol::new(".".to_string(), 2)?;
+            let op = operation::new(sym, vec![elem, result])?;
+            result = term { term_type: TermType::Operation(op) };
+        }
+        Ok(result)
     }
 
     fn try_parse_variable(&mut self) -> Result<Option<individual_variable>> {
@@ -307,21 +364,21 @@ mod tests {
         assert!(matches!(r.rule_type, RuleType::General));
         assert_eq!(r.head.len(), 1);
         assert_eq!(r.body.len(), 2);
-        assert_eq!(r.to_string(), "happy(A) :- lego_builder(A), enjoys_lego(A)");
+        assert_eq!(r.to_string(), "happy(A) :- lego_builder(A), enjoys_lego(A).");
     }
 
     #[test]
     fn parse_unit_clause() {
         let r = parse_rule("loves(alice, bob)").unwrap();
         assert!(matches!(r.rule_type, RuleType::UnitClause));
-        assert_eq!(r.to_string(), "loves(alice, bob)");
+        assert_eq!(r.to_string(), "loves(alice, bob).");
     }
 
     #[test]
     fn parse_goal() {
         let r = parse_rule(":- happy(A), lego_builder(A)").unwrap();
         assert!(matches!(r.rule_type, RuleType::Goal));
-        assert_eq!(r.to_string(), ":- happy(A), lego_builder(A)");
+        assert_eq!(r.to_string(), ":- happy(A), lego_builder(A).");
     }
 
     #[test]
@@ -364,7 +421,7 @@ mod tests {
         assert_eq!(r.head.len(), 1);
         assert_eq!(r.body.len(), 1);
         assert!(matches!(r.rule_type, RuleType::General));
-        assert_eq!(r.to_string(), "h(X) :- b(X)");
+        assert_eq!(r.to_string(), "h(X) :- b(X).");
     }
 
     #[test]
@@ -375,7 +432,7 @@ mod tests {
         ).unwrap();
         assert_eq!(r.head.len(), 1);
         assert_eq!(r.body.len(), 2);
-        assert_eq!(r.to_string(), "happy(A) :- lego_builder(A), enjoys_lego(A)");
+        assert_eq!(r.to_string(), "happy(A) :- lego_builder(A), enjoys_lego(A).");
     }
 
     #[test]
@@ -398,6 +455,99 @@ mod tests {
         assert_eq!(r.head.len(), 1);
     }
 
+    // ── list term parsing ────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_empty_list_as_term() {
+        let r = parse_rule("p([])").unwrap();
+        // p([]) is a unit clause with one term: the constant []
+        assert!(matches!(r.rule_type, RuleType::UnitClause));
+        let t = &r.head[0];
+        if let literal::positive_literal(a) = t {
+            assert_eq!(a.terms.len(), 1);
+            assert!(matches!(a.terms[0].term_type, TermType::Constant(_)));
+        } else {
+            panic!("expected positive literal");
+        }
+    }
+
+    #[test]
+    fn parse_singleton_list_as_term() {
+        let r = parse_rule("p([a])").unwrap();
+        assert!(matches!(r.rule_type, RuleType::UnitClause));
+        if let literal::positive_literal(a) = &r.head[0] {
+            assert_eq!(a.terms.len(), 1);
+            // '.'(a, []) — top level should be an Operation with symbol "."
+            assert!(matches!(a.terms[0].term_type, TermType::Operation(_)));
+            if let TermType::Operation(op) = &a.terms[0].term_type {
+                assert_eq!(op.symbol.symbol, ".");
+                assert_eq!(op.vars.len(), 2);
+                // first arg is constant 'a', second is constant '[]'
+                assert!(matches!(op.vars[0].term_type, TermType::Constant(_)));
+                assert!(matches!(op.vars[1].term_type, TermType::Constant(_)));
+            }
+        } else {
+            panic!("expected positive literal");
+        }
+    }
+
+    #[test]
+    fn parse_multi_element_list_as_term() {
+        // [a, b, c] → '.'(a, '.'(b, '.'(c, [])))
+        let r = parse_rule("p([a, b, c])").unwrap();
+        if let literal::positive_literal(a) = &r.head[0] {
+            let mut cur = &a.terms[0];
+            for expected in &["a", "b", "c"] {
+                if let TermType::Operation(op) = &cur.term_type {
+                    assert_eq!(op.symbol.symbol, ".");
+                    if let TermType::Constant(c) = &op.vars[0].term_type {
+                        assert_eq!(c.0.symbol, *expected);
+                    } else {
+                        panic!("expected constant {expected}");
+                    }
+                    cur = &op.vars[1];
+                } else {
+                    panic!("expected '.' operation");
+                }
+            }
+            // tail should be []
+            assert!(matches!(cur.term_type, TermType::Constant(_)));
+            if let TermType::Constant(c) = &cur.term_type {
+                assert_eq!(c.0.symbol, "[]");
+            }
+        } else {
+            panic!("expected positive literal");
+        }
+    }
+
+    #[test]
+    fn parse_list_with_variables() {
+        let r = parse_rule("p([X, Y])").unwrap();
+        if let literal::positive_literal(a) = &r.head[0] {
+            if let TermType::Operation(op) = &a.terms[0].term_type {
+                assert_eq!(op.symbol.symbol, ".");
+                assert!(matches!(op.vars[0].term_type, TermType::Variable(_)));
+            } else {
+                panic!("expected '.' operation");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_nested_list() {
+        // [[a], b] → '.'('.'(a, []), '.'(b, []))
+        let r = parse_rule("p([[a], b])").unwrap();
+        if let literal::positive_literal(a) = &r.head[0] {
+            if let TermType::Operation(outer) = &a.terms[0].term_type {
+                assert_eq!(outer.symbol.symbol, ".");
+                // first element is itself a '.' operation (the inner [a])
+                assert!(matches!(outer.vars[0].term_type, TermType::Operation(_)));
+            } else {
+                panic!("expected outer '.' operation");
+            }
+        }
+    }
+
     #[test]
     fn formula_not_an_implication_is_err() {
         assert!(parse_formula_as_rule("(A and B)").is_err());
@@ -409,6 +559,6 @@ mod tests {
         let r = parse_formula_as_rule("(¬dangerous(A)) => (safe(A))").unwrap();
         assert_eq!(r.body.len(), 1);
         assert!(matches!(r.body[0], literal::negative_literal(_, _)));
-        assert_eq!(r.to_string(), "safe(A) :- ¬dangerous(A)");
+        assert_eq!(r.to_string(), "safe(A) :- ¬dangerous(A).");
     }
 }

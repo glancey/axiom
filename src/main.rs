@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use formalisms::{
     individual_variable, logical_symbol, operation_symbol,
-    individual_constant, relation_symbol, term, Formula,
+    individual_constant, relation_symbol, Formula,
 };
 use axiom_parser::parse_formula;
 use axiom::helpers::{
@@ -119,7 +119,7 @@ fn main() -> Result<()> {
                         relation_symbol::new(value.clone(), rank).map(|_| format!("relation_symbol({value}, rank={rank})"))
                     }
                 }
-                "6" => term::new(value.clone(), None, vec![]).map(|_| format!("term({value})")),
+                "6" => axiom_syntalog::parse_term(&value).map(|_| format!("term({value})")),
                 _ => anyhow::bail!("invalid selection"),
             };
 
@@ -133,6 +133,14 @@ fn main() -> Result<()> {
             let is_symbol_application = normalized
                 .chars().next().map_or(false, |c| c.is_ascii_lowercase())
                 && normalized.contains('(');
+            // For symbol applications, parse_term handles list syntax and nested
+            // operations correctly; the naive comma-split in parse_symbol_args does not.
+            if is_symbol_application {
+                if let Ok(_) = axiom_syntalog::parse_term(&normalized) {
+                    println!("Valid formula: {normalized}");
+                    return Ok(());
+                }
+            }
             let formula_str = if is_symbol_application {
                 if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
                     format!("{}({})", sym.0.symbol, args.join(", "))
@@ -176,7 +184,9 @@ fn main() -> Result<()> {
                 Ok(r) => {
                     let subs: Result<Vec<formalisms::term>> = terms
                         .split(',')
-                        .map(|t| formalisms::term::new(t.trim().to_string(), Some(0), vec![]))
+                        .map(|t| t.trim())
+                        .filter(|t| !t.is_empty())
+                        .map(axiom_syntalog::parse_term)
                         .collect();
                     match subs {
                         Err(e) => println!("Error parsing terms: {e}"),

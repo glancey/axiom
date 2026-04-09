@@ -52,20 +52,21 @@ fn normalize_line(line: &str) -> &str {
     line.trim().trim_end_matches('.')
 }
 
-fn fmt_term(t: &term) -> String {
-    match &t.term_type {
-        TermType::Variable(v) => v.name.clone(),
-        TermType::Constant(c) => c.0.symbol.clone(),
-        TermType::Operation(op) => {
-            let args: Vec<String> = op.vars.iter().map(fmt_term).collect();
-            format!("{}({})", op.symbol.symbol, args.join(", "))
-        }
-    }
-}
 
 fn collect_ground_terms_from_term(t: &term, acc: &mut HashSet<String>) {
-    if t.is_ground() {
-        acc.insert(fmt_term(t));
+    match &t.term_type {
+        TermType::Constant(c) => {
+            // Exclude structural list constants; collect only domain individuals.
+            if c.0.symbol != "[]" {
+                acc.insert(c.0.symbol.clone());
+            }
+        }
+        TermType::Operation(op) => {
+            for v in &op.vars {
+                collect_ground_terms_from_term(v, acc);
+            }
+        }
+        TermType::Variable(_) => {}
     }
 }
 
@@ -169,6 +170,62 @@ fn literals_in_content(content: &str) -> HashSet<String> {
 /// Reads a `.pl` file and returns all literals found across all parseable lines.
 pub fn literals_in_file(path: impl AsRef<std::path::Path>) -> Result<HashSet<String>> {
     Ok(literals_in_content(&read_file(path)?))
+}
+
+fn positive_facts_in_content(content: &str) -> HashSet<String> {
+    let mut facts = HashSet::new();
+    for line in content.lines() {
+        let s = normalize_line(line);
+        if s.is_empty() || s.starts_with('%') { continue; }
+        if let Ok(r) = parse_rule(s) {
+            // Only collect positive head literals from unit clauses and facts.
+            if r.body.is_empty() {
+                for lit in &r.head {
+                    if matches!(lit, literal::positive_literal(_)) {
+                        facts.insert(lit.to_string());
+                    }
+                }
+            }
+        }
+    }
+    facts
+}
+
+pub fn positive_facts_in_file(path: impl AsRef<std::path::Path>) -> Result<HashSet<String>> {
+    Ok(positive_facts_in_content(&read_file(path)?))
+}
+
+/// Collects the underlying positive atom from each negative unit-clause head.
+/// e.g. `not happy(claire).` → `"happy(claire)"` (the atom that is false).
+fn negative_example_atoms_in_content(content: &str) -> HashSet<String> {
+    let mut atoms = HashSet::new();
+    for line in content.lines() {
+        let s = normalize_line(line);
+        if s.is_empty() || s.starts_with('%') { continue; }
+        if let Ok(r) = parse_rule(s) {
+            if r.body.is_empty() {
+                for lit in &r.head {
+                    if let literal::negative_literal(pred, terms) = lit {
+                        // Reconstruct as a positive atom string for use in base.
+                        let args: Vec<String> = terms.iter()
+                            .map(|t| axiom_syntalog::term_to_string(t))
+                            .collect();
+                        let atom_str = if args.is_empty() {
+                            pred.0.symbol.clone()
+                        } else {
+                            format!("{}({})", pred.0.symbol, args.join(", "))
+                        };
+                        atoms.insert(atom_str);
+                    }
+                }
+            }
+        }
+    }
+    atoms
+}
+
+pub fn negative_example_atoms_in_file(path: impl AsRef<std::path::Path>) -> Result<HashSet<String>> {
+    Ok(negative_example_atoms_in_content(&read_file(path)?))
 }
 
 /// Returns induced ground rules: ground literals as-is, non-ground literals substituted
@@ -280,7 +337,7 @@ mod tests {
         assert!(matches!(r.rule_type, RuleType::UnitClause));
         assert_eq!(r.head.len(), 1);
         assert!(r.body.is_empty());
-        assert_eq!(r.to_string(), "happy(A)");
+        assert_eq!(r.to_string(), "happy(A).");
     }
 
     #[test]
@@ -294,7 +351,7 @@ mod tests {
     fn induce_ground_atom_produces_fact_with_value_true() {
         let r = induce_rule("mild(tandoori)").unwrap();
         assert!(matches!(r.rule_type, RuleType::Fact));
-        assert_eq!(r.to_string(), "mild(tandoori)");
+        assert_eq!(r.to_string(), "mild(tandoori).");
         let formula = r.to_formula().unwrap();
         assert_eq!(formula.value, Some(true));
     }
