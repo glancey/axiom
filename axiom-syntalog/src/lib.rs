@@ -285,7 +285,7 @@ pub enum RuleType {
 /// - UnitClause/Fact (no body): `h1 ∧ … ∧ hn`
 /// - Goal (no head): `b1 ∧ … ∧ bm`
 #[allow(non_camel_case_types)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct rule {
     pub head: Vec<literal>,
     pub body: Vec<literal>,
