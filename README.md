@@ -10,7 +10,6 @@ A CLI tool for constructing, validating, and evaluating well-formed formulas (wf
 | `formalisms` | Core domain types and formula evaluation |
 | `axiom_parser` | Recursive-descent formula parser |
 | `axiom-syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
-| `axiom-indoos` | Inductive logic programming — induces hypotheses from background knowledge and examples |
 
 ## Installation
 
@@ -109,102 +108,6 @@ axiom tautological-proof "(not(P and Q) <=> (notP or notQ))"
 | `literal` | Positive or negative occurrence of an atom |
 | `rule` | A clause `h1, ..., hn :- b1, ..., bm` with a `RuleType` discriminant |
 | `RuleType` | `General`, `UnitClause`, `Goal`, `DefiniteClause`, `HornRule`, `Fact` |
-
----
-
-## axiom-indoos
-
-`axiom-indoos` implements Inductive Logic Programming (ILP). Given background knowledge, positive examples, and negative examples as Prolog-style `.pl` files, it induces generalized hypothesis rules that are consistent with the interpretation.
-
-### axiom-indoos Commands
-
-#### `load`
-
-Parses and classifies each line of a `.pl` file.
-
-```sh
-axiom-indoos load <file.pl>
-```
-
-#### `induce`
-
-Induces hypothesis rules from three `.pl` files. Prints the terms, base atoms, interpretation, and induced model.
-
-```sh
-axiom-indoos induce <background.pl> <ex_plus.pl> <ex_minus.pl>
-```
-
-**Example:**
-
-Given these files:
-
-`background.pl`
-
-```prolog
-lego_builder(alice).
-enjoys_lego(alice).
-happy(alice).
-lego_builder(bob).
-```
-
-`ex_plus.pl`
-
-```prolog
-enjoys_lego(claire).
-estate_agent(claire).
-estate_agent(dave).
-```
-
-`ex_minus.pl`
-
-```prolog
-happy(bob).
-```
-
-Running:
-
-```sh
-axiom-indoos induce background.pl ex_plus.pl ex_minus.pl
-```
-
-Produces:
-
-```text
-Terms: {"alice", "bob", "claire", "dave"}
-
-Base: ["enjoys_lego(alice)", "enjoys_lego(bob)", ..., "lego_builder(dave)"]
-
-Interpretation: ["enjoys_lego(alice)", "enjoys_lego(claire)", "estate_agent(claire)",
-                 "estate_agent(dave)", "happy(alice)", "lego_builder(alice)", "lego_builder(bob)"]
-
-Model:
-  enjoys_lego(A) :- happy(A), lego_builder(A)
-  happy(A) :- enjoys_lego(A), lego_builder(A)
-  lego_builder(A) :- enjoys_lego(A), happy(A)
-```
-
-**How it works:**
-
-1. **Terms** — ground constants found in the background file.
-2. **Base** — all ground atoms formed by substituting each term into every predicate symbol across all three files.
-3. **Interpretation** — members of base that appear as literals in the background or positive examples.
-4. **Model** — generalized rules `h :- b1, ..., bn` where at least one ground substitution makes all literals true in the interpretation, and no substitution satisfies the body while the head is false.
-
-#### `prove-induced`
-
-Parses a rule string and builds a proof table for it.
-
-```sh
-axiom-indoos prove-induced "happy(A) :- lego_builder(A)"
-```
-
-#### `induce-rule`
-
-Classifies an atom or literal and builds a unit clause rule from it.
-
-```sh
-axiom-indoos induce-rule "happy(alice)"
-```
 
 ---
 

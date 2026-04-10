@@ -48,25 +48,34 @@ pub fn parse_formula(s: &str) -> Result<FormulaType> {
 }
 
 /// Recursive-descent parser that consumes a formula string character by character.
-struct Parser {
-    /// The full input string being parsed.
+/// The struct and its cursor methods are public so that `axiom-syntalog` can reuse
+/// the shared term/name/variable parsing without duplicating the implementation.
+pub struct Parser {
     input: String,
-    /// Current byte offset into `input`.
     pos: usize,
 }
 
 impl Parser {
-    fn new(input: &str) -> Self {
+    pub fn new(input: &str) -> Self {
         Parser { input: input.to_string(), pos: 0 }
     }
 
+    /// Current byte offset into the input.
+    pub fn pos(&self) -> usize { self.pos }
+
+    /// Returns `true` when all input has been consumed.
+    pub fn is_done(&self) -> bool { self.pos >= self.input.len() }
+
+    /// Advances the cursor by `n` bytes.
+    pub fn advance(&mut self, n: usize) { self.pos += n; }
+
     /// Returns the unparsed remainder of the input.
-    fn rest(&self) -> &str {
+    pub fn rest(&self) -> &str {
         &self.input[self.pos..]
     }
 
     /// Advances `pos` past any leading whitespace.
-    fn skip_ws(&mut self) {
+    pub fn skip_ws(&mut self) {
         while let Some(c) = self.rest().chars().next() {
             if c.is_whitespace() { self.pos += c.len_utf8(); } else { break; }
         }
@@ -74,7 +83,7 @@ impl Parser {
 
     /// Skips whitespace then expects and consumes the literal string `s`, returning an
     /// error if it is not present.
-    fn consume(&mut self, s: &str) -> Result<()> {
+    pub fn consume(&mut self, s: &str) -> Result<()> {
         self.skip_ws();
         if self.rest().starts_with(s) {
             self.pos += s.len();
@@ -175,7 +184,7 @@ impl Parser {
     }
 
     /// Parses a comma-separated list of terms, stopping before a closing `)`.
-    fn term_list(&mut self) -> Result<Vec<term>> {
+    pub fn term_list(&mut self) -> Result<Vec<term>> {
         let mut terms = Vec::new();
         loop {
             self.skip_ws();
@@ -189,7 +198,7 @@ impl Parser {
 
     /// Parses a single term: a variable (`[A-Z]'*`), an operation `name(term, ...)`,
     /// or a constant (`name`).
-    fn term(&mut self) -> Result<term> {
+    pub fn term(&mut self) -> Result<term> {
         self.skip_ws();
         if let Some(v) = self.try_parse_variable()? {
             return Ok(term { term_type: TermType::Variable(v) });
@@ -213,7 +222,7 @@ impl Parser {
     /// Returns `Ok(Some(v))` and advances `pos` on success.
     /// Returns `Ok(None)` without advancing if the first char is not uppercase or if the token
     /// is followed by `(` (which signals a relation/operation name instead).
-    fn try_parse_variable(&mut self) -> Result<Option<individual_variable>> {
+    pub fn try_parse_variable(&mut self) -> Result<Option<individual_variable>> {
         let start = self.pos;
         if let Some(c) = self.rest().chars().next() {
             if c.is_ascii_uppercase() {
@@ -248,7 +257,7 @@ impl Parser {
 
     /// Parses a name token: a lowercase ASCII letter followed by zero or more
     /// alphanumeric characters or underscores.
-    fn name(&mut self) -> Result<String> {
+    pub fn name(&mut self) -> Result<String> {
         self.skip_ws();
         let start = self.pos;
         match self.rest().chars().next() {

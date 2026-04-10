@@ -1,6 +1,7 @@
 use anyhow::Result;
-use formalisms::{individual_variable, individual_constant, operation_symbol, operation, term, TermType, FormulaType};
+use formalisms::{TermType, FormulaType};
 use crate::{predicate_symbol, atom, literal, rule};
+use axiom_parser::Parser;
 
 /// Parses a string of the form `h1, …, hn :- b1, …, bm` into a [`rule`].
 ///
@@ -18,182 +19,83 @@ use crate::{predicate_symbol, atom, literal, rule};
 /// name         := [a-z][a-zA-Z0-9_]*
 /// ```
 pub fn parse_rule(s: &str) -> Result<rule> {
-    let mut p = Parser::new(s);
-    let r = p.rule()?;
+    let mut p = Parser::new(s.trim());
+    let r = rule_inner(&mut p)?;
     p.skip_ws();
-    if p.pos < p.input.len() {
-        anyhow::bail!("unexpected input at position {}: {:?}", p.pos, &p.input[p.pos..]);
+    if !p.is_done() {
+        anyhow::bail!("unexpected input at position {}: {:?}", p.pos(), p.rest());
     }
     Ok(r)
 }
 
-struct Parser {
-    input: String,
-    pos: usize,
+fn rule_inner(p: &mut Parser) -> Result<rule> {
+    p.skip_ws();
+    if p.rest().starts_with(":-") {
+        p.advance(2);
+        let body = literal_list(p)?;
+        return rule::goal(body);
+    }
+    let head = literal_list(p)?;
+    p.skip_ws();
+    if p.rest().starts_with(":-") {
+        p.advance(2);
+        let body = literal_list(p)?;
+        return rule::new(head, body);
+    }
+    rule::unit_clause(head)
 }
 
-impl Parser {
-    fn new(input: &str) -> Self {
-        Parser { input: input.trim().to_string(), pos: 0 }
+fn literal_list(p: &mut Parser) -> Result<Vec<literal>> {
+    let mut lits = Vec::new();
+    loop {
+        p.skip_ws();
+        if p.rest().is_empty() || p.rest().starts_with(":-") { break; }
+        lits.push(parse_literal(p)?);
+        p.skip_ws();
+        if p.rest().starts_with(',') { p.advance(1); } else { break; }
     }
+    Ok(lits)
+}
 
-    fn rest(&self) -> &str {
-        &self.input[self.pos..]
-    }
-
-    fn skip_ws(&mut self) {
-        while let Some(c) = self.rest().chars().next() {
-            if c.is_whitespace() { self.pos += c.len_utf8(); } else { break; }
-        }
-    }
-
-    fn consume(&mut self, s: &str) -> Result<()> {
-        self.skip_ws();
-        if self.rest().starts_with(s) {
-            self.pos += s.len();
-            Ok(())
+fn parse_literal(p: &mut Parser) -> Result<literal> {
+    p.skip_ws();
+    let negated =
+        if p.rest().starts_with('¬') {
+            p.advance('¬'.len_utf8());
+            true
+        } else if p.rest().starts_with('-') {
+            p.advance(1);
+            true
+        } else if p.rest().starts_with("not")
+            && p.rest()[3..].starts_with(|c: char| c.is_whitespace() || c == '(') {
+            p.advance(3);
+            true
         } else {
-            anyhow::bail!("expected {:?} at position {}", s, self.pos)
-        }
-    }
-
-    fn rule(&mut self) -> Result<rule> {
-        self.skip_ws();
-        // Goal: starts with ':-'
-        if self.rest().starts_with(":-") {
-            self.pos += 2;
-            let body = self.literal_list()?;
-            return rule::goal(body);
-        }
-        let head = self.literal_list()?;
-        self.skip_ws();
-        if self.rest().starts_with(":-") {
-            self.pos += 2;
-            let body = self.literal_list()?;
-            return rule::new(head, body);
-        }
-        // Unit clause: head only
-        rule::unit_clause(head)
-    }
-
-    fn literal_list(&mut self) -> Result<Vec<literal>> {
-        let mut lits = Vec::new();
-        loop {
-            self.skip_ws();
-            if self.rest().is_empty() || self.rest().starts_with(":-") { break; }
-            lits.push(self.literal()?);
-            self.skip_ws();
-            if self.rest().starts_with(',') { self.pos += 1; } else { break; }
-        }
-        Ok(lits)
-    }
-
-    fn literal(&mut self) -> Result<literal> {
-        self.skip_ws();
-        // Negation: ¬, -, or 'not' followed by whitespace
-        let negated =
-            if self.rest().starts_with('¬') {
-                self.pos += '¬'.len_utf8();
-                true
-            } else if self.rest().starts_with('-') {
-                self.pos += 1;
-                true
-            } else if self.rest().starts_with("not")
-                && self.rest()[3..].starts_with(|c: char| c.is_whitespace() || c == '(') {
-                self.pos += 3;
-                true
-            } else {
-                false
-            };
-
-        let a = self.atom()?;
-        if negated {
-            literal::negative(a.predicate, a.terms)
-        } else {
-            Ok(literal::positive_literal(a))
-        }
-    }
-
-    fn atom(&mut self) -> Result<atom> {
-        self.skip_ws();
-        let name = self.name()?;
-        self.skip_ws();
-        let terms = if self.rest().starts_with('(') {
-            self.consume("(")?;
-            let ts = self.term_list()?;
-            self.consume(")")?;
-            ts
-        } else {
-            vec![]
+            false
         };
-        let rank = terms.len() as u32;
-        let pred = predicate_symbol::new(name, rank)?;
-        atom::new(pred, terms)
+    let a = parse_atom(p)?;
+    if negated {
+        literal::negative(a.predicate, a.terms)
+    } else {
+        Ok(literal::positive_literal(a))
     }
+}
 
-    fn term_list(&mut self) -> Result<Vec<term>> {
-        let mut terms = Vec::new();
-        loop {
-            self.skip_ws();
-            if self.rest().starts_with(')') { break; }
-            terms.push(self.term()?);
-            self.skip_ws();
-            if self.rest().starts_with(',') { self.pos += 1; } else { break; }
-        }
-        Ok(terms)
-    }
-
-    fn term(&mut self) -> Result<term> {
-        self.skip_ws();
-        if let Some(v) = self.try_parse_variable()? {
-            return Ok(term { term_type: TermType::Variable(v) });
-        }
-        let name = self.name()?;
-        self.skip_ws();
-        if self.rest().starts_with('(') {
-            self.consume("(")?;
-            let vars = self.term_list()?;
-            self.consume(")")?;
-            let sym = operation_symbol::new(name, vars.len() as u32)?;
-            let op = operation::new(sym, vars)?;
-            Ok(term { term_type: TermType::Operation(op) })
-        } else {
-            let c = individual_constant::new(name)?;
-            Ok(term { term_type: TermType::Constant(c) })
-        }
-    }
-
-    fn try_parse_variable(&mut self) -> Result<Option<individual_variable>> {
-        let start = self.pos;
-        if let Some(c) = self.rest().chars().next() {
-            if c.is_ascii_uppercase() {
-                self.pos += c.len_utf8();
-                while self.rest().starts_with('\'') { self.pos += 1; }
-                let s = self.input[start..self.pos].to_string();
-                self.skip_ws();
-                if !self.rest().starts_with('(') {
-                    return Ok(Some(individual_variable::new(&s)?));
-                }
-                self.pos = start;
-            }
-        }
-        Ok(None)
-    }
-
-    fn name(&mut self) -> Result<String> {
-        self.skip_ws();
-        let start = self.pos;
-        match self.rest().chars().next() {
-            Some(c) if c.is_ascii_lowercase() => {
-                self.pos += c.len_utf8();
-                while let Some(c) = self.rest().chars().next() {
-                    if c.is_alphanumeric() || c == '_' { self.pos += c.len_utf8(); } else { break; }
-                }
-                Ok(self.input[start..self.pos].to_string())
-            }
-            _ => anyhow::bail!("expected name at position {}", self.pos),
-        }
-    }
+fn parse_atom(p: &mut Parser) -> Result<atom> {
+    p.skip_ws();
+    let name = p.name()?;
+    p.skip_ws();
+    let terms = if p.rest().starts_with('(') {
+        p.consume("(")?;
+        let ts = p.term_list()?;
+        p.consume(")")?;
+        ts
+    } else {
+        vec![]
+    };
+    let rank = terms.len() as u32;
+    let pred = predicate_symbol::new(name, rank)?;
+    atom::new(pred, terms)
 }
 
 /// Parses a formula string of the form `(b1 ∧ … ∧ bm) => (h1 ∧ … ∧ hn)` into a [`rule`].

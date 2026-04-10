@@ -130,24 +130,31 @@ fn main() -> Result<()> {
         }
         Commands::CheckFormula { value } => {
             let normalized = normalize_formula(&value);
-            let is_symbol_application = normalized
-                .chars().next().map_or(false, |c| c.is_ascii_lowercase())
-                && normalized.contains('(');
-            let formula_str = if is_symbol_application {
-                if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
-                    format!("{}({})", sym.0.symbol, args.join(", "))
-                } else if let Ok((sym, args)) = parse_operation_symbol(&normalized) {
-                    format!("{}({})", sym.symbol, args.join(", "))
-                } else {
-                    normalized
+            if normalized.contains(":-") {
+                match parse_rule_input(&normalized) {
+                    Ok(r) => { println!("Valid rule: {normalized}\n{r:#?}"); }
+                    Err(e) => println!("Invalid rule: {e}"),
                 }
             } else {
-                normalized
-            };
-            let parse_str = if !formula_str.starts_with('(') { format!("({formula_str})") } else { formula_str.clone() };
-            match parse_formula(&parse_str) {
-                Ok(ft) => println!("Valid formula: {formula_str}\n{ft:#?}"),
-                Err(e) => println!("Invalid formula: {e}"),
+                let is_symbol_application = normalized
+                    .chars().next().map_or(false, |c| c.is_ascii_lowercase())
+                    && normalized.contains('(');
+                let formula_str = if is_symbol_application {
+                    if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
+                        format!("{}({})", sym.0.symbol, args.join(", "))
+                    } else if let Ok((sym, args)) = parse_operation_symbol(&normalized) {
+                        format!("{}({})", sym.symbol, args.join(", "))
+                    } else {
+                        normalized
+                    }
+                } else {
+                    normalized
+                };
+                let parse_str = if !formula_str.starts_with('(') { format!("({formula_str})") } else { formula_str.clone() };
+                match parse_formula(&parse_str) {
+                    Ok(ft) => println!("Valid formula: {formula_str}\n{ft:#?}"),
+                    Err(e) => println!("Invalid formula: {e}"),
+                }
             }
         }
         Commands::TautologicalProof { value } => {
