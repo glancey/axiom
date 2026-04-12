@@ -1,0 +1,8 @@
+[package]
+name = "axiom-prolog"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+scryer-prolog = { path = "/Users/glennsilverman/git/scryer-prolog", default-features = false }
+serde_json = "1"
