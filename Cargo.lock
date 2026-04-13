@@ -109,6 +109,9 @@ dependencies = [
 name = "axiom-prolog"
 version = "0.1.0"
 dependencies = [
+ "axiom",
+ "axiom-syntalog",
+ "clap",
  "scryer-prolog",
  "serde_json",
 ]

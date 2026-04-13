@@ -227,7 +227,13 @@ impl Parser {
         if let Some(c) = self.rest().chars().next() {
             if c.is_ascii_uppercase() {
                 self.pos += c.len_utf8();
-                while self.rest().starts_with('\'') { self.pos += 1; }
+                while let Some(c) = self.rest().chars().next() {
+                    if c.is_alphanumeric() || c == '_' || c == '\'' {
+                        self.pos += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
                 let s = self.input[start..self.pos].to_string();
                 self.skip_ws();
                 if !self.rest().starts_with('(') {
@@ -241,14 +247,20 @@ impl Parser {
     }
 
     /// Parses an individual variable token: an uppercase ASCII letter followed by zero
-    /// or more prime (`'`) characters.
+    /// or more letters, digits, underscores, or apostrophes.
     fn individual_variable(&mut self) -> Result<individual_variable> {
         self.skip_ws();
         let start = self.pos;
         match self.rest().chars().next() {
             Some(c) if c.is_ascii_uppercase() => {
                 self.pos += c.len_utf8();
-                while self.rest().starts_with('\'') { self.pos += 1; }
+                while let Some(c) = self.rest().chars().next() {
+                    if c.is_alphanumeric() || c == '_' || c == '\'' {
+                        self.pos += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
                 individual_variable::new(&self.input[start..self.pos])
             }
             _ => anyhow::bail!("expected individual variable at position {}", self.pos),
@@ -324,7 +336,7 @@ mod tests {
     #[test]
     fn parse_formula_invalid() {
         assert!(parse_formula("").is_err());
-        assert!(parse_formula("ABC").is_err());
+        assert!(parse_formula("123").is_err());
     }
 
     #[test]

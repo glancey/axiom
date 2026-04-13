@@ -15,7 +15,7 @@ pub fn normalize_logical_symbol(s: &str) -> &str {
         "iff"          => "<=>",
         "for all"      => "\u{2200}",
         "there exists" => "\u{018E}",
-        "equals"       => "==",
+        "equals"       => "=",
         other          => other,
     }
 }
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn normalize_logical_symbol_equals() {
-        assert_eq!(normalize_logical_symbol("equals"), "==");
+        assert_eq!(normalize_logical_symbol("equals"), "=");
     }
 
     #[test]
@@ -194,8 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_multiple_uppercase_letters_is_error() {
-        assert!(validate("ABC").starts_with("Error:"));
+    fn validate_multichar_variable() {
+        assert_eq!(validate("ABC"), "individual_variable(ABC)");
+        assert_eq!(validate("Day"), "individual_variable(Day)");
     }
 
     #[test]

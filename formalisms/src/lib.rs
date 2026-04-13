@@ -6,8 +6,9 @@ pub mod proofs;
 use proofs::{Proof, ProofTable};
 
 /// A variable ranging over individuals in the domain.
-/// Must be a single uppercase letter (A–Z), optionally followed by one or more apostrophes.
-/// Examples: `A`, `B'`, `X'''`
+/// Must begin with an uppercase ASCII letter (A–Z), optionally followed by any
+/// combination of letters, digits, underscores, or apostrophes.
+/// Examples: `A`, `B'`, `X'''`, `Day`, `Node1`
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct individual_variable {
@@ -16,19 +17,17 @@ pub struct individual_variable {
 
 impl individual_variable {
     pub fn new(s: &str) -> Result<Self> {
-        let mut chars = s.chars().peekable();
+        let mut chars = s.chars();
         match chars.next() {
             Some(c) if c.is_ascii_uppercase() => {}
-            _ => anyhow::bail!("individual_variable must be a single uppercase letter"),
+            _ => anyhow::bail!("individual_variable must begin with an uppercase letter"),
         }
-        if chars.peek().map_or(false, |c| c.is_ascii_uppercase()) {
-            anyhow::bail!("individual_variable must be a single uppercase letter");
-        }
-        while chars.peek().map_or(false, |c| *c == '\'') {
-            chars.next();
-        }
-        if chars.next().is_some() {
-            anyhow::bail!("individual_variable may only contain A-Z letters optionally followed by apostrophes");
+        for c in chars {
+            if !c.is_alphanumeric() && c != '_' && c != '\'' {
+                anyhow::bail!(
+                    "individual_variable may only contain letters, digits, underscores, or apostrophes after the initial uppercase letter"
+                );
+            }
         }
         Ok(individual_variable { name: s.to_string() })
     }
