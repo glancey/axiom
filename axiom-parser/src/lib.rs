@@ -149,7 +149,7 @@ impl Parser {
     /// Reads one of the recognised binary connectives (`<=>`, `=>`, `∧`, `∨`, `==`).
     fn binary_connective(&mut self) -> Result<String> {
         self.skip_ws();
-        for op in &["<->", "->", "\u{2227}", "\u{2228}", "=="] {
+        for op in &["<->", "->", "\u{2227}", "\u{2228}", "="] {
             if self.rest().starts_with(op) {
                 self.pos += op.len();
                 return Ok(op.to_string());
@@ -224,8 +224,8 @@ impl Parser {
     /// is followed by `(` (which signals a relation/operation name instead).
     pub fn try_parse_variable(&mut self) -> Result<Option<individual_variable>> {
         let start = self.pos;
-        if let Some(c) = self.rest().chars().next() {
-            if c.is_ascii_uppercase() {
+        if let Some(c) = self.rest().chars().next()
+            && c.is_ascii_uppercase() {
                 self.pos += c.len_utf8();
                 while let Some(c) = self.rest().chars().next() {
                     if c.is_alphanumeric() || c == '_' || c == '\'' {
@@ -241,7 +241,6 @@ impl Parser {
                     return Ok(Some(v));
                 }
                 self.pos = start;
-            }
         }
         Ok(None)
     }

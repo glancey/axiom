@@ -156,17 +156,15 @@ impl term {
         if let Ok(v) = individual_variable::new(&s) {
             return Ok(term { term_type: TermType::Variable(v) });
         }
-        if rank == Some(0) {
-            if let Ok(c) = individual_constant::new(s.clone()) {
+        if rank == Some(0)
+            && let Ok(c) = individual_constant::new(s.clone()) {
                 return Ok(term { term_type: TermType::Constant(c) });
-            }
         }
-        if let Some(m) = rank {
-            if m > 0 {
+        if let Some(m) = rank
+            && m > 0 {
                 let sym = operation_symbol::new(s.clone(), m)?;
                 let op = operation::new(sym, vars)?;
                 return Ok(term { term_type: TermType::Operation(op) });
-            }
         }
         anyhow::bail!("not a valid term: {s}")
     }
@@ -198,7 +196,7 @@ fn eval_connective(sym: &logical_symbol, results: &[bool]) -> bool {
     match sym.0.as_str() {
         "\u{2227}" => results.iter().all(|&v| v),
         "\u{2228}" => results.iter().any(|&v| v),
-        "\u{00AC}" => results.first().map_or(false, |&v| !v),
+        "\u{00AC}" => results.first().is_some_and(|&v| !v),
         "->" => results.len() != 2 || !results[0] || results[1],
         "<->" => results.len() == 2 && results[0] == results[1],
         _ => false,
@@ -223,6 +221,7 @@ impl Formula {
     /// - Atomic formulas (`Term`, `Relation`): returns `self.value.unwrap_or(false)`.
     /// - `Combination`: evaluates structurally by the connective, recursing with `context`.
     /// - `Quantifier`: delegates to the body formula.
+    ///
     /// Collect all unique variable names appearing in this formula.
     pub fn collect_variables(&self) -> Vec<String> {
         let mut vars = Vec::new();
@@ -378,16 +377,16 @@ impl Formula {
         }
     }
 
-    pub fn is_true(&self, context: &[Formula]) -> bool {
+    pub fn is_true(&self, _context: &[Formula]) -> bool {
         match &self.formula_type {
             FormulaType::Term(_) | FormulaType::Relation(_, _) => {
                 self.value.unwrap_or(false)
             }
             FormulaType::Combination(sym, formulas) => {
-                let results: Vec<bool> = formulas.iter().map(|f| f.is_true(context)).collect();
+                let results: Vec<bool> = formulas.iter().map(|f| f.is_true(_context)).collect();
                 eval_connective(sym, &results)
             }
-            FormulaType::Quantifier(_, _, body) => body.is_true(context),
+            FormulaType::Quantifier(_, _, body) => body.is_true(_context),
         }
     }
 }

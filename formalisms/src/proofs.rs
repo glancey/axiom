@@ -16,6 +16,12 @@ impl Proof {
     }
 }
 
+impl Default for Proof {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Debug for Proof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Proof")
@@ -35,6 +41,15 @@ impl ProofTable {
             proofs: Vec::new(),
         }
     }
+}
+
+impl Default for ProofTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProofTable {
 
     pub fn merge(&mut self, other: ProofTable) {
         self.proofs.extend(other.proofs);
