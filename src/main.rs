@@ -239,7 +239,7 @@ fn main() -> Result<()> {
                 .map(|p| normalize_formula(p.trim()).to_string())
                 .collect();
             let normalized_conclusion = normalize_formula(conclusion_str.trim()).to_string();
-            println!("Validate: [{}] => {}", normalized_premises.join(" . "), normalized_conclusion);
+            println!("Validate: [{}] -> {}", normalized_premises.join(" . "), normalized_conclusion);
 
             let mut premises = Vec::new();
             for part in premises_str.split(" . ") {
@@ -283,7 +283,7 @@ fn main() -> Result<()> {
             println!();
             println!("logical_symbol");
             println!("  One of the fixed logical connectives and punctuation symbols of the language:");
-            println!("  ∧ (and), ∨ (or), => (implies), ¬ (not), <=> (iff),");
+            println!("  ∧ (and), ∨ (or), -> (implies), ¬ (not), <-> (iff),");
             println!("  ∀ (for all), Ǝ (there exists), == (equals), (, )");
             println!();
             println!("operation_symbol");
@@ -312,7 +312,7 @@ fn main() -> Result<()> {
             println!("  Validates a logical argument by building proof tables for each premise");
             println!("  and a truth table for the conclusion under assignments where all premises hold.");
             println!("  Format: <premise> . <premise> ... :: <conclusion>");
-            println!("  Example: (P => notQ) . P :: notQ");
+            println!("  Example: (P -> notQ) . P :: notQ");
         }
     }
 

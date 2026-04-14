@@ -43,7 +43,7 @@ pub struct logical_symbol(String);
 impl logical_symbol {
     pub fn new(s: String) -> Result<Self> {
         const VALID: &[&str] = &[
-            "\u{2227}", "\u{2228}", "=>", "\u{00AC}", "<=>",
+            "\u{2227}", "\u{2228}", "->", "\u{00AC}", "<->",
             "\u{2200}", "\u{018E}", "==", "(", ")",
         ];
         if VALID.contains(&s.as_str()) {
@@ -199,8 +199,8 @@ fn eval_connective(sym: &logical_symbol, results: &[bool]) -> bool {
         "\u{2227}" => results.iter().all(|&v| v),
         "\u{2228}" => results.iter().any(|&v| v),
         "\u{00AC}" => results.first().map_or(false, |&v| !v),
-        "=>" => results.len() != 2 || !results[0] || results[1],
-        "<=>" => results.len() == 2 && results[0] == results[1],
+        "->" => results.len() != 2 || !results[0] || results[1],
+        "<->" => results.len() == 2 && results[0] == results[1],
         _ => false,
     }
 }
@@ -442,7 +442,7 @@ impl rule {
             Formula { formula_type: FormulaType::Combination(and, self.body), value: None }
         };
 
-        let implies = logical_symbol::new("=>".to_string())?;
+        let implies = logical_symbol::new("->".to_string())?;
         Ok(Formula {
             formula_type: FormulaType::Combination(implies, vec![body_formula, head_formula]),
             value: None,
@@ -458,9 +458,9 @@ mod tests {
     fn logical_symbol_valid() {
         assert!(logical_symbol::new("\u{2227}".to_string()).is_ok());
         assert!(logical_symbol::new("\u{2228}".to_string()).is_ok());
-        assert!(logical_symbol::new("=>".to_string()).is_ok());
+        assert!(logical_symbol::new("->".to_string()).is_ok());
         assert!(logical_symbol::new("\u{00AC}".to_string()).is_ok());
-        assert!(logical_symbol::new("<=>".to_string()).is_ok());
+        assert!(logical_symbol::new("<->".to_string()).is_ok());
         assert!(logical_symbol::new("\u{2200}".to_string()).is_ok());
         assert!(logical_symbol::new("\u{018E}".to_string()).is_ok());
         assert!(logical_symbol::new("==".to_string()).is_ok());
@@ -540,7 +540,7 @@ mod tests {
         let p = Formula { formula_type: FormulaType::Term(term::new("X".to_string(), None, vec![]).unwrap()), value: None };
         let q = Formula { formula_type: FormulaType::Term(term::new("Y".to_string(), None, vec![]).unwrap()), value: None };
 
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![p, q]),
             value: None,
@@ -605,12 +605,12 @@ mod tests {
             formula_type: FormulaType::Combination(not, vec![f2]),
             value: None,
         };
-        let inner_implies = logical_symbol::new("=>".to_string()).unwrap();
+        let inner_implies = logical_symbol::new("->".to_string()).unwrap();
         let inner = Formula {
             formula_type: FormulaType::Combination(inner_implies, vec![not_f2, f3]),
             value: None,
         };
-        let outer_implies = logical_symbol::new("=>".to_string()).unwrap();
+        let outer_implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(outer_implies, vec![f1, inner]),
             value: None,
@@ -641,7 +641,7 @@ mod tests {
         // A <=> B where A is false and B is false; result should be true
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let iff = logical_symbol::new("<=>".to_string()).unwrap();
+        let iff = logical_symbol::new("<->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(iff, vec![a, b]),
             value: None,
@@ -654,7 +654,7 @@ mod tests {
         // A <=> B where A is true and B is false; result should be false
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let iff = logical_symbol::new("<=>".to_string()).unwrap();
+        let iff = logical_symbol::new("<->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(iff, vec![a, b]),
             value: None,
@@ -719,7 +719,7 @@ mod tests {
         // A => B where A is true and B is true; result should be true
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(true) };
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
@@ -732,7 +732,7 @@ mod tests {
         // A => B where A is false; result should be true regardless of B
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(false) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
@@ -745,7 +745,7 @@ mod tests {
         // A => B where A is true and B has no assigned value (defaults to false); result should be false
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: None };
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
@@ -758,7 +758,7 @@ mod tests {
         // A => B where A is true and B is false; result should be false
         let a = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("B".to_string(), None, vec![]).unwrap()), value: Some(false) };
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
@@ -780,7 +780,7 @@ mod tests {
             formula_type: FormulaType::Combination(and, vec![f1, f3]),
             value: None,
         };
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![antecedent, f2]),
             value: None,
@@ -824,7 +824,7 @@ mod tests {
         // A => A is a tautology
         let a1 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
         let a2 = Formula { formula_type: FormulaType::Term(term::new("A".to_string(), None, vec![]).unwrap()), value: None };
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(implies, vec![a1, a2]),
             value: None,
@@ -841,7 +841,7 @@ mod tests {
         let not_a = Formula { formula_type: FormulaType::Combination(not1, vec![a1]), value: None };
         let not2 = logical_symbol::new("\u{00AC}".to_string()).unwrap();
         let not_not_a = Formula { formula_type: FormulaType::Combination(not2, vec![not_a]), value: None };
-        let iff = logical_symbol::new("<=>".to_string()).unwrap();
+        let iff = logical_symbol::new("<->".to_string()).unwrap();
         let formula = Formula {
             formula_type: FormulaType::Combination(iff, vec![not_not_a, a2]),
             value: None,
@@ -874,27 +874,27 @@ mod tests {
 
         // A => B
         let a_implies_b = Formula {
-            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a1, b1]),
+            formula_type: FormulaType::Combination(logical_symbol::new("->".to_string()).unwrap(), vec![a1, b1]),
             value: None,
         };
         // B => C
         let b_implies_c = Formula {
-            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![b2, c1]),
+            formula_type: FormulaType::Combination(logical_symbol::new("->".to_string()).unwrap(), vec![b2, c1]),
             value: None,
         };
         // A => C
         let a_implies_c = Formula {
-            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a2, c2]),
+            formula_type: FormulaType::Combination(logical_symbol::new("->".to_string()).unwrap(), vec![a2, c2]),
             value: None,
         };
         // (B => C) => (A => C)
         let inner = Formula {
-            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![b_implies_c, a_implies_c]),
+            formula_type: FormulaType::Combination(logical_symbol::new("->".to_string()).unwrap(), vec![b_implies_c, a_implies_c]),
             value: None,
         };
         // (A => B) => ((B => C) => (A => C))
         let formula = Formula {
-            formula_type: FormulaType::Combination(logical_symbol::new("=>".to_string()).unwrap(), vec![a_implies_b, inner]),
+            formula_type: FormulaType::Combination(logical_symbol::new("->".to_string()).unwrap(), vec![a_implies_b, inner]),
             value: None,
         };
         assert!(formula.is_tautology(&mut ProofTable::new()));
@@ -915,7 +915,7 @@ mod tests {
         let f = rule::new(vec![h], vec![b]).unwrap().to_formula().unwrap();
         assert!(matches!(f.formula_type, FormulaType::Combination(_, _)));
         if let FormulaType::Combination(sym, parts) = &f.formula_type {
-            assert_eq!(sym.0, "=>");
+            assert_eq!(sym.0, "->");
             assert_eq!(parts.len(), 2);
         }
     }
@@ -929,7 +929,7 @@ mod tests {
         let b2 = Formula { formula_type: FormulaType::Term(term::new("C".to_string(), None, vec![]).unwrap()), value: None };
         let f = rule::new(vec![h1, h2], vec![b1, b2]).unwrap().to_formula().unwrap();
         if let FormulaType::Combination(sym, parts) = &f.formula_type {
-            assert_eq!(sym.0, "=>");
+            assert_eq!(sym.0, "->");
             // both sides are conjunctions
             assert!(matches!(parts[0].formula_type, FormulaType::Combination(_, _)));
             assert!(matches!(parts[1].formula_type, FormulaType::Combination(_, _)));

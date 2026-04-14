@@ -149,7 +149,7 @@ impl Parser {
     /// Reads one of the recognised binary connectives (`<=>`, `=>`, `∧`, `∨`, `==`).
     fn binary_connective(&mut self) -> Result<String> {
         self.skip_ws();
-        for op in &["<=>", "=>", "\u{2227}", "\u{2228}", "=="] {
+        for op in &["<->", "->", "\u{2227}", "\u{2228}", "=="] {
             if self.rest().starts_with(op) {
                 self.pos += op.len();
                 return Ok(op.to_string());
@@ -317,8 +317,8 @@ mod tests {
     fn parse_formula_combination() {
         assert!(matches!(parse_formula("(A ∧ B)"), Ok(FormulaType::Combination(_, _))));
         assert!(matches!(parse_formula("(A ∨ B)"), Ok(FormulaType::Combination(_, _))));
-        assert!(matches!(parse_formula("(A => B)"), Ok(FormulaType::Combination(_, _))));
-        assert!(matches!(parse_formula("(A <=> B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(A -> B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(A <-> B)"), Ok(FormulaType::Combination(_, _))));
     }
 
     #[test]
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn parse_formula_nested() {
-        assert!(matches!(parse_formula("(¬A => B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(¬A -> B)"), Ok(FormulaType::Combination(_, _))));
         assert!(matches!(parse_formula("∀X.(A ∧ B)"), Ok(FormulaType::Quantifier(_, _, _))));
     }
 
@@ -342,11 +342,11 @@ mod tests {
     #[test]
     fn parse_formula_auto_parenthesized() {
         assert!(parse_formula("(A)").is_ok());
-        assert!(parse_formula("P=>Q").is_ok());
+        assert!(parse_formula("P->Q").is_ok());
     }
 
     #[test]
     fn parse_formula_implication_p_implies_q() {
-        assert!(matches!(parse_formula("P=>Q"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("P->Q"), Ok(FormulaType::Combination(_, _))));
     }
 }

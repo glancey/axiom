@@ -81,7 +81,7 @@ mod tests {
         };
 
         // P => ¬Q  (value = Some(true))
-        let implies = logical_symbol::new("=>".to_string()).unwrap();
+        let implies = logical_symbol::new("->".to_string()).unwrap();
         let p_implies_not_q = Formula {
             formula_type: FormulaType::Combination(implies, vec![make_var("P", None), not_q]),
             value: Some(true),
