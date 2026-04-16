@@ -29,7 +29,10 @@ pub fn normalize_formula(s: &str) -> String {
     let mut result = String::new();
     let mut i = 0;
     while i < s.len() {
-        if s[i..].starts_with("not(") {
+        if s[i..].starts_with('~') {
+            result.push('\u{00AC}');
+            i += 1;
+        } else if s[i..].starts_with("not(") {
             result.push('\u{00AC}');
             result.push('(');
             i += 4;

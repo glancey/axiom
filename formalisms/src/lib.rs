@@ -34,8 +34,8 @@ impl individual_variable {
 }
 
 /// One of the fixed logical connectives and punctuation symbols of the language:
-/// `/\` (and), `\/` (or), `=>` (implies), `¬` (not), `<=>` (iff),
-/// `∀` (for all), `Ǝ` (there exists), `==` (equals), `(`, `)`
+/// `/\` (and), `\/` (or), `->` (implies), `¬` (not), `<->` (iff),
+/// `∀` (for all), `Ǝ` (there exists), `=` (equals), `(`, `)`
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
 pub struct logical_symbol(String);
@@ -44,7 +44,7 @@ impl logical_symbol {
     pub fn new(s: String) -> Result<Self> {
         const VALID: &[&str] = &[
             "\u{2227}", "\u{2228}", "->", "\u{00AC}", "<->",
-            "\u{2200}", "\u{018E}", "=", "==", "(", ")",
+            "\u{2200}", "\u{018E}", "=", "(", ")",
         ];
         if VALID.contains(&s.as_str()) {
             Ok(logical_symbol(s))
@@ -462,7 +462,7 @@ mod tests {
         assert!(logical_symbol::new("<->".to_string()).is_ok());
         assert!(logical_symbol::new("\u{2200}".to_string()).is_ok());
         assert!(logical_symbol::new("\u{018E}".to_string()).is_ok());
-        assert!(logical_symbol::new("==".to_string()).is_ok());
+        assert!(logical_symbol::new("=".to_string()).is_ok());
         assert!(logical_symbol::new("(".to_string()).is_ok());
         assert!(logical_symbol::new(")".to_string()).is_ok());
     }

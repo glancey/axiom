@@ -11,7 +11,7 @@ use formalisms::{
 /// formula  := quantifier | negation | combination | atomic
 /// quantifier := ('∀' | 'Ǝ') variable '.' formula
 /// negation   := '\u{00AC}' formula
-/// combination := '(' formula ('∧'|'∨'|'/\'|'\/'|'=>'|'<=>'|'==') formula ')'
+/// combination := '(' formula ('∧'|'∨'|'/\'|'\/'|'->'|'<->'|'=') formula ')'
 /// atomic     := variable | relation | constant
 /// relation   := name '(' term (',' term)* ')'
 /// term       := variable | constant | operation
