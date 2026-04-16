@@ -98,7 +98,7 @@ fn parse_atom(p: &mut Parser) -> Result<atom> {
     atom::new(pred, terms)
 }
 
-/// Parses a formula string of the form `(b1 ∧ … ∧ bm) => (h1 ∧ … ∧ hn)` into a [`rule`].
+/// Parses a formula string of the form `(b1 ∧ … ∧ bm) -> (h1 ∧ … ∧ hn)` into a [`rule`].
 ///
 /// Uses [`axiom_parser::parse_formula`] to consume the formula, then converts the
 /// top-level implication into `head :- body` form. Each conjunction side is
@@ -106,38 +106,61 @@ fn parse_atom(p: &mut Parser) -> Result<atom> {
 ///
 /// # Accepted connective spellings
 /// The `axiom_parser` normalises `" and "` → `∧` before parsing, so both
-/// `(b1 and b2) => h1` and `(b1 ∧ b2) => h1` are accepted.
+/// `(b1 and b2) -> h1` and `(b1 ∧ b2) -> h1` are accepted.
 ///
 /// # Errors
-/// Returns an error if the formula is not a top-level `=>` combination, or if
+/// Returns an error if the formula is not a top-level `->` combination, or if
 /// any operand cannot be converted to a syntalog literal.
-/// Wraps each bare `lhs==rhs` equality in parentheses so the axiom parser
+/// Wraps each bare `lhs=rhs` equality in parentheses so the axiom parser
 /// (which requires every binary combination to be explicitly parenthesised)
 /// can parse them when they appear inside a disjunction or conjunction.
 /// e.g. `Day==saturday or Day==sunday` → `(Day==saturday) or (Day==sunday)`.
+fn is_standalone_eq(chars: &[char], i: usize) -> bool {
+    let prev = i.checked_sub(1).map(|j| chars[j]).unwrap_or('\0');
+    let next = chars.get(i + 1).copied().unwrap_or('\0');
+    // Skip compound operators: ->, =>, <=, !=, >=, ==
+    !(prev == '!' || prev == '<' || prev == '>' || prev == '-' || prev == '='
+        || next == '>' || next == '=')
+}
+
+fn is_token_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '\''
+}
+
 fn wrap_equalities(s: &str) -> String {
-    let mut result = String::new();
-    let mut rest = s;
-    while let Some(eq_pos) = rest.find("==") {
-        let before = &rest[..eq_pos];
-        let after = &rest[eq_pos + 2..];
-        let lhs_start = before
-            .rfind(|c: char| !c.is_alphanumeric() && c != '\'' && c != '_')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let rhs_end = after
-            .find(|c: char| !c.is_alphanumeric() && c != '\'' && c != '_')
-            .unwrap_or(after.len());
-        result.push_str(&before[..lhs_start]);
-        result.push('(');
-        result.push_str(&before[lhs_start..]);
-        result.push_str("==");
-        result.push_str(&after[..rhs_end]);
-        result.push(')');
-        rest = &after[rhs_end..];
+    let chars: Vec<char> = s.chars().collect();
+    let mut result: Vec<char> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '=' && is_standalone_eq(&chars, i) {
+            // Walk back in result past spaces to find end of lhs token
+            let mut back = result.len();
+            while back > 0 && result[back - 1] == ' ' { back -= 1; }
+            // Walk back through the lhs token
+            let mut lhs_start = back;
+            while lhs_start > 0 && is_token_char(result[lhs_start - 1]) { lhs_start -= 1; }
+            let prefix: Vec<char> = result[..lhs_start].to_vec();
+            let lhs: String = result[lhs_start..back].iter().collect();
+            result = prefix;
+            // Walk forward past spaces after '=' to find rhs token
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] == ' ' { j += 1; }
+            let rhs_start = j;
+            while j < chars.len() && is_token_char(chars[j]) { j += 1; }
+            let rhs: String = chars[rhs_start..j].iter().collect();
+            // Write wrapped equality
+            result.push('(');
+            result.extend(lhs.chars());
+            result.extend(" = ".chars());
+            result.extend(rhs.chars());
+            result.push(')');
+            i = j;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
     }
-    result.push_str(rest);
-    result
+    result.into_iter().collect()
 }
 
 /// Finds the byte index of the `)` matching the `(` at byte offset `open`.
@@ -221,16 +244,16 @@ fn right_nest_disjunctions(s: &str) -> String {
 }
 
 pub fn parse_formula_as_rule(s: &str) -> Result<rule> {
-    // Wrap bare lhs==rhs expressions in parens, right-nest flat `or` chains so
+    // Wrap bare lhs=rhs expressions in parens, right-nest flat `or` chains so
     // the axiom parser (binary-only) can parse them, then wrap the whole formula
-    // in outer parens so the top-level '=>' is seen as a binary connective.
+    // in outer parens so the top-level '->' is seen as a binary connective.
     let preprocessed = wrap_equalities(s.trim());
     let preprocessed = right_nest_disjunctions(&preprocessed);
     let wrapped = format!("({})", preprocessed);
     let ft = axiom_parser::parse_formula(&wrapped)?;
     match ft {
         FormulaType::Combination(sym, mut parts)
-            if sym.symbol() == "=>" && parts.len() == 2 =>
+            if sym.symbol() == "->" && parts.len() == 2 =>
         {
             // parts[0] = body conjunction, parts[1] = head conjunction
             let head_f = parts.remove(1);
@@ -243,7 +266,7 @@ pub fn parse_formula_as_rule(s: &str) -> Result<rule> {
             rule::new(head_lits, body_lits)
         }
         _ => anyhow::bail!(
-            "formula must be a top-level implication of the form (body) => (head)"
+            "formula must be a top-level implication of the form (body) -> (head)"
         ),
     }
 }
@@ -331,9 +354,9 @@ fn formula_type_to_literal(ft: FormulaType) -> Result<literal> {
                 _ => anyhow::bail!("negation (¬) must wrap an atom, not a compound formula"),
             }
         }
-        // Equality: lhs==rhs
+        // Equality: lhs=rhs
         FormulaType::Combination(sym, mut parts)
-            if sym.symbol() == "==" && parts.len() == 2 =>
+            if sym.symbol() == "=" && parts.len() == 2 =>
         {
             let rhs = formula_type_to_term(parts.remove(1).formula_type)?;
             let lhs = formula_type_to_term(parts.remove(0).formula_type)?;
@@ -406,8 +429,8 @@ mod tests {
 
     #[test]
     fn formula_single_body_single_head() {
-        // (b(X)) => (h(X))  ≡  h(X) :- b(X)
-        let r = parse_formula_as_rule("(b(X)) => (h(X))").unwrap();
+        // (b(X)) -> (h(X))  ≡  h(X) :- b(X)
+        let r = parse_formula_as_rule("(b(X)) -> (h(X))").unwrap();
         assert_eq!(r.head.len(), 1);
         assert_eq!(r.body.len(), 1);
         assert!(matches!(r.rule_type, RuleType::General));
@@ -416,9 +439,9 @@ mod tests {
 
     #[test]
     fn formula_conjunction_body_single_head() {
-        // (lego_builder(A) and enjoys_lego(A)) => (happy(A))
+        // (lego_builder(A) and enjoys_lego(A)) -> (happy(A))
         let r = parse_formula_as_rule(
-            "(lego_builder(A) and enjoys_lego(A)) => (happy(A))"
+            "(lego_builder(A) and enjoys_lego(A)) -> (happy(A))"
         ).unwrap();
         assert_eq!(r.head.len(), 1);
         assert_eq!(r.body.len(), 2);
@@ -427,9 +450,9 @@ mod tests {
 
     #[test]
     fn formula_conjunction_body_conjunction_head() {
-        // (b1(X) and b2(X)) => (h1(X) and h2(X))
+        // (b1(X) and b2(X)) -> (h1(X) and h2(X))
         let r = parse_formula_as_rule(
-            "(b1(X) and b2(X)) => (h1(X) and h2(X))"
+            "(b1(X) and b2(X)) -> (h1(X) and h2(X))"
         ).unwrap();
         assert_eq!(r.head.len(), 2);
         assert_eq!(r.body.len(), 2);
@@ -437,9 +460,9 @@ mod tests {
 
     #[test]
     fn formula_nested_conjunction_is_flattened() {
-        // ((b1(X) and b2(X)) and b3(X)) => h(X)  →  body has 3 literals
+        // ((b1(X) and b2(X)) and b3(X)) -> h(X)  →  body has 3 literals
         let r = parse_formula_as_rule(
-            "((b1(X) and b2(X)) and b3(X)) => (h(X))"
+            "((b1(X) and b2(X)) and b3(X)) -> (h(X))"
         ).unwrap();
         assert_eq!(r.body.len(), 3);
         assert_eq!(r.head.len(), 1);
@@ -452,8 +475,8 @@ mod tests {
 
     #[test]
     fn formula_negated_body_literal() {
-        // (¬dangerous(A)) => (safe(A))
-        let r = parse_formula_as_rule("(¬dangerous(A)) => (safe(A))").unwrap();
+        // (¬dangerous(A)) -> (safe(A))
+        let r = parse_formula_as_rule("(¬dangerous(A)) -> (safe(A))").unwrap();
         assert_eq!(r.body.len(), 1);
         assert!(matches!(r.body[0], literal::negative_literal(_, _)));
         assert_eq!(r.to_string(), "safe(A) :- ¬dangerous(A)");
@@ -462,7 +485,7 @@ mod tests {
     #[test]
     fn formula_disjunction_with_equality_and_multichar_variable() {
         let r = parse_formula_as_rule(
-            "(Day==saturday or Day==sunday) => is_weekend(Day)"
+            "(Day = saturday or Day = sunday) -> is_weekend(Day)"
         ).unwrap();
         assert_eq!(r.head.len(), 1);
         assert_eq!(r.body.len(), 1);

@@ -6,40 +6,22 @@ use axiom_syntalog::{parse_rule, parse_formula_as_rule};
 use scryer_prolog::{LeafAnswer, MachineBuilder, Term};
 use serde_json::{json, Value};
 
-/// Normalizes standalone `=` to `==` for the axiom formula parser, which requires
-/// the double form as its equality connective. Leaves `=>` and `<=>` unchanged.
-fn normalize_eq(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut result = String::new();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '=' {
-            let prev = i.checked_sub(1).map(|j| chars[j]).unwrap_or('\0');
-            let next = chars.get(i + 1).copied().unwrap_or('\0');
-            if prev == '<' || prev == '=' || next == '>' || next == '=' {
-                result.push('=');
-            } else {
-                result.push_str("==");
-            }
-        } else {
-            result.push(chars[i]);
-        }
-        i += 1;
-    }
-    result
-}
-
 /// Parses `input` as either a Prolog-style rule (`head :- body`) or an axiom
 /// formula rule (`(body) => (head)`), then returns the canonical Prolog string
 /// terminated with a period. Falls back to `normalize_for_parse` if neither parse succeeds.
 pub fn to_prolog_string(input: &str) -> String {
-    let rule_str = if input.contains("=>") {
-        let normalized = normalize_eq(input);
-        parse_formula_as_rule(&normalized).map(|r| r.to_string())
+    let rule_str = if input.contains("->") {
+        parse_formula_as_rule(input).map(|r| r.to_string())
     } else {
         parse_rule(input).map(|r| r.to_string())
     }
     .unwrap_or_else(|_| normalize_for_parse(input));
+
+    let rule_str = rule_str
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .map(|s| s.to_string())
+        .unwrap_or(rule_str);
 
     if rule_str.ends_with('.') {
         rule_str
@@ -149,6 +131,7 @@ pub fn query(path: PathBuf) {
         }
 
         let query = to_prolog_string(query);
+        println!("Query: {query}");
 
         let mut answers: Vec<Value> = machine.run_query(query).map(answer_to_json).collect();
         // scryer-prolog appends a final False to signal "no more solutions"; drop it
@@ -163,4 +146,22 @@ pub fn query(path: PathBuf) {
     }
 
     println!("\nGoodbye.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_prolog_string_unit_clause() {
+        assert_eq!(to_prolog_string("is_weekday(monday)"), "is_weekday(monday).");
+    }
+
+    #[test]
+    fn to_prolog_string_weekend_disjunction() {
+        assert_eq!(
+            to_prolog_string("(Day = saturday or  Day = sunday) -> is_weekend(Day)"),
+            "is_weekend(Day) :- (Day = saturday ; Day = sunday).",
+        );
+    }
 }

@@ -44,7 +44,7 @@ impl logical_symbol {
     pub fn new(s: String) -> Result<Self> {
         const VALID: &[&str] = &[
             "\u{2227}", "\u{2228}", "->", "\u{00AC}", "<->",
-            "\u{2200}", "\u{018E}", "==", "(", ")",
+            "\u{2200}", "\u{018E}", "=", "==", "(", ")",
         ];
         if VALID.contains(&s.as_str()) {
             Ok(logical_symbol(s))

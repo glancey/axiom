@@ -287,7 +287,7 @@ fn build_rule_formula(head: &[literal], body: &[literal]) -> Result<Formula> {
         (false, false) => {
             let body_f = literals_to_conjunction(body)?;
             let head_f = literals_to_conjunction(head)?;
-            let implies = logical_symbol::new("=>".to_string())?;
+            let implies = logical_symbol::new("->".to_string())?;
             Ok(Formula {
                 formula_type: FormulaType::Combination(implies, vec![body_f, head_f]),
                 value: None,
@@ -971,7 +971,7 @@ mod tests {
     fn rule_to_json() {
         let r = crate::parse::parse_rule("happy(A) :- lego_builder(A), enjoys_lego(A)").unwrap();
         let json = r.to_json();
-        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}],"formula":{"value":null,"type":"combination","connective":"=>","operands":[{"value":null,"type":"combination","connective":"∧","operands":[{"value":null,"type":"relation","symbol":"lego_builder","terms":[{"type":"variable","name":"A"}]},{"value":null,"type":"relation","symbol":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}]},{"value":null,"type":"relation","symbol":"happy","terms":[{"type":"variable","name":"A"}]}]}}"#);
+        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}],"formula":{"value":null,"type":"combination","connective":"->","operands":[{"value":null,"type":"combination","connective":"∧","operands":[{"value":null,"type":"relation","symbol":"lego_builder","terms":[{"type":"variable","name":"A"}]},{"value":null,"type":"relation","symbol":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}]},{"value":null,"type":"relation","symbol":"happy","terms":[{"type":"variable","name":"A"}]}]}}"#);
     }
 
     #[test]
