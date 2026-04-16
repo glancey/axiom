@@ -51,21 +51,6 @@ impl Default for ProofTable {
 
 impl ProofTable {
 
-    pub fn merge(&mut self, other: ProofTable) {
-        self.proofs.extend(other.proofs);
-    }
-
-    /// Injects fixed key-value pairs into every row of every proof in the table.
-    pub fn inject_keys(&mut self, keys: &HashMap<String, bool>) {
-        for proof in &mut self.proofs {
-            for eval in &mut proof.evals {
-                for (k, v) in keys {
-                    eval.insert(k.clone(), *v);
-                }
-            }
-        }
-    }
-
     pub fn build_table(self) {
         if self.proofs.is_empty() {
             return;

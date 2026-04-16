@@ -314,20 +314,17 @@ impl Formula {
                     TermType::Variable(v) => *assignment.get(&v.name).unwrap_or(&false),
                     _ => self.value.unwrap_or(false),
                 };
-                //println!("  {} = {}", self.display_str(), val);
                 proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
             FormulaType::Relation(_, _) => {
                 let val = self.value.unwrap_or(false);
-                //println!("  {} = {}", self.display_str(), val);
                 proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
             FormulaType::Combination(sym, formulas) => {
                 let sub_results: Vec<bool> = formulas.iter().map(|f| f.evaluate_verbose(assignment, proof)).collect();
                 let val = eval_connective(sym, &sub_results);
-                //println!("  {} = {}", self.display_str(), val);
                 proof.evals.push(HashMap::from([(self.display_str(), val)]));
                 val
             }
@@ -340,15 +337,10 @@ impl Formula {
     pub fn is_tautology(&self, proof_table: &mut ProofTable) -> bool {
         let vars = self.collect_variables();
         for assignment in all_assignments(&vars) {
-            let mut sorted: Vec<(&String, &bool)> = assignment.iter().collect();
-            sorted.sort_by_key(|(k, _)| *k);
-            //let row: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
-            //println!("assignment: [{}]", row.join(", "));
             let mut proof = Proof::new();
             proof.values.push(assignment.clone());
             proof_table.proofs.push(proof);
             let result = self.evaluate_verbose(&assignment, proof_table.proofs.last_mut().unwrap());
-            //println!("result => {}", result);
             if !result {
                 return false;
             }
@@ -377,16 +369,16 @@ impl Formula {
         }
     }
 
-    pub fn is_true(&self, _context: &[Formula]) -> bool {
+    pub fn is_true(&self) -> bool {
         match &self.formula_type {
             FormulaType::Term(_) | FormulaType::Relation(_, _) => {
                 self.value.unwrap_or(false)
             }
             FormulaType::Combination(sym, formulas) => {
-                let results: Vec<bool> = formulas.iter().map(|f| f.is_true(_context)).collect();
+                let results: Vec<bool> = formulas.iter().map(|f| f.is_true()).collect();
                 eval_connective(sym, &results)
             }
-            FormulaType::Quantifier(_, _, body) => body.is_true(_context),
+            FormulaType::Quantifier(_, _, body) => body.is_true(),
         }
     }
 }
@@ -614,7 +606,7 @@ mod tests {
             formula_type: FormulaType::Combination(outer_implies, vec![f1, inner]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -632,7 +624,7 @@ mod tests {
             formula_type: FormulaType::Combination(or, vec![a, not_b]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -645,7 +637,7 @@ mod tests {
             formula_type: FormulaType::Combination(iff, vec![a, b]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -658,7 +650,7 @@ mod tests {
             formula_type: FormulaType::Combination(iff, vec![a, b]),
             value: None,
         };
-        assert!(!formula.is_true(&[]));
+        assert!(!formula.is_true());
     }
 
     #[test]
@@ -671,7 +663,7 @@ mod tests {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
         };
-        assert!(!formula.is_true(&[]));
+        assert!(!formula.is_true());
     }
 
     #[test]
@@ -684,7 +676,7 @@ mod tests {
             formula_type: FormulaType::Combination(or, vec![a, b]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -697,7 +689,7 @@ mod tests {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -710,7 +702,7 @@ mod tests {
             formula_type: FormulaType::Combination(and, vec![a, b]),
             value: None,
         };
-        assert!(!formula.is_true(&[]));
+        assert!(!formula.is_true());
     }
 
     #[test]
@@ -723,7 +715,7 @@ mod tests {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -736,7 +728,7 @@ mod tests {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -749,7 +741,7 @@ mod tests {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
         };
-        assert!(!formula.is_true(&[]));
+        assert!(!formula.is_true());
     }
 
     #[test]
@@ -762,7 +754,7 @@ mod tests {
             formula_type: FormulaType::Combination(implies, vec![a, b]),
             value: None,
         };
-        assert!(!formula.is_true(&[]));
+        assert!(!formula.is_true());
     }
 
     #[test]
@@ -784,7 +776,7 @@ mod tests {
             formula_type: FormulaType::Combination(implies, vec![antecedent, f2]),
             value: None,
         };
-        assert!(formula.is_true(&[]));
+        assert!(formula.is_true());
     }
 
     #[test]
@@ -952,7 +944,7 @@ mod tests {
         let h = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
         let b = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(true) };
         let f = rule::new(vec![h], vec![b]).unwrap().to_formula().unwrap();
-        assert!(f.is_true(&[]));
+        assert!(f.is_true());
     }
 
     #[test]
@@ -961,7 +953,7 @@ mod tests {
         let h = Formula { formula_type: FormulaType::Term(term::new("Q".to_string(), Some(0), vec![]).unwrap()), value: Some(false) };
         let b = Formula { formula_type: FormulaType::Term(term::new("P".to_string(), Some(0), vec![]).unwrap()), value: Some(false) };
         let f = rule::new(vec![h], vec![b]).unwrap().to_formula().unwrap();
-        assert!(f.is_true(&[]));
+        assert!(f.is_true());
     }
 
 }
