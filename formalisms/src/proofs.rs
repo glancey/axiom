@@ -16,6 +16,12 @@ impl Proof {
     }
 }
 
+impl Default for Proof {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl fmt::Debug for Proof {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Proof")
@@ -35,21 +41,15 @@ impl ProofTable {
             proofs: Vec::new(),
         }
     }
+}
 
-    pub fn merge(&mut self, other: ProofTable) {
-        self.proofs.extend(other.proofs);
+impl Default for ProofTable {
+    fn default() -> Self {
+        Self::new()
     }
+}
 
-    /// Injects fixed key-value pairs into every row of every proof in the table.
-    pub fn inject_keys(&mut self, keys: &HashMap<String, bool>) {
-        for proof in &mut self.proofs {
-            for eval in &mut proof.evals {
-                for (k, v) in keys {
-                    eval.insert(k.clone(), *v);
-                }
-            }
-        }
-    }
+impl ProofTable {
 
     pub fn build_table(self) {
         if self.proofs.is_empty() {

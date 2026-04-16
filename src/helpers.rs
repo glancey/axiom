@@ -10,12 +10,12 @@ pub fn normalize_logical_symbol(s: &str) -> &str {
     match s.trim() {
         "and"          => "\u{2227}",
         "or"           => "\u{2228}",
-        "implies"      => "=>",
+        "implies"      => "->",
         "not"          => "\u{00AC}",
-        "iff"          => "<=>",
+        "iff"          => "<->",
         "for all"      => "\u{2200}",
         "there exists" => "\u{018E}",
-        "equals"       => "==",
+        "equals"       => "=",
         other          => other,
     }
 }
@@ -29,7 +29,10 @@ pub fn normalize_formula(s: &str) -> String {
     let mut result = String::new();
     let mut i = 0;
     while i < s.len() {
-        if s[i..].starts_with("not(") {
+        if s[i..].starts_with('~') {
+            result.push('\u{00AC}');
+            i += 1;
+        } else if s[i..].starts_with("not(") {
             result.push('\u{00AC}');
             result.push('(');
             i += 4;
@@ -45,7 +48,7 @@ pub fn normalize_formula(s: &str) -> String {
             }
         } else {
             let c = s[i..].chars().next().unwrap();
-            result.push(c);
+            result.push(c);                    
             i += c.len_utf8();
         }
     }
@@ -73,9 +76,9 @@ pub fn normalize_for_parse(s: &str) -> String {
     if !n.starts_with('(') { format!("({n})") } else { n }
 }
 
-/// Parses a rule string in either Prolog style or formula (`=>`) style.
+/// Parses a rule string in either Prolog style or formula (`->`) style.
 pub fn parse_rule_input(s: &str) -> Result<axiom_syntalog::rule> {
-    if s.contains("=>") { parse_formula_as_rule(s) } else { parse_rule(s) }
+    if s.contains("->") { parse_formula_as_rule(s) } else { parse_rule(s) }
 }
 
 pub fn parse_operation_symbol(s: &str) -> Result<(operation_symbol, Vec<String>)> {
@@ -122,7 +125,7 @@ mod tests {
 
     #[test]
     fn normalize_logical_symbol_implies() {
-        assert_eq!(normalize_logical_symbol("implies"), "=>");
+        assert_eq!(normalize_logical_symbol("implies"), "->");
     }
 
     #[test]
@@ -132,7 +135,7 @@ mod tests {
 
     #[test]
     fn normalize_logical_symbol_iff() {
-        assert_eq!(normalize_logical_symbol("iff"), "<=>");
+        assert_eq!(normalize_logical_symbol("iff"), "<->");
     }
 
     #[test]
@@ -147,12 +150,12 @@ mod tests {
 
     #[test]
     fn normalize_logical_symbol_equals() {
-        assert_eq!(normalize_logical_symbol("equals"), "==");
+        assert_eq!(normalize_logical_symbol("equals"), "=");
     }
 
     #[test]
     fn normalize_logical_symbol_passthrough() {
-        assert_eq!(normalize_logical_symbol("=>"), "=>");
+        assert_eq!(normalize_logical_symbol("->"), "->");
         assert_eq!(normalize_logical_symbol("\u{2227}"), "\u{2227}");
         assert_eq!(normalize_logical_symbol("unknown"), "unknown");
     }
@@ -194,8 +197,9 @@ mod tests {
     }
 
     #[test]
-    fn validate_multiple_uppercase_letters_is_error() {
-        assert!(validate("ABC").starts_with("Error:"));
+    fn validate_multichar_variable() {
+        assert_eq!(validate("ABC"), "individual_variable(ABC)");
+        assert_eq!(validate("Day"), "individual_variable(Day)");
     }
 
     #[test]
@@ -283,8 +287,8 @@ mod tests {
 
     #[test]
     fn check_formula_implication() {
-        assert!(parse_formula("P=>Q").is_ok());
-        assert!(parse_formula("(P=>Q)").is_ok());
+        assert!(parse_formula("P->Q").is_ok());
+        assert!(parse_formula("(P->Q)").is_ok());
     }
 
     fn check_formula(value: &str) -> String {
@@ -316,7 +320,7 @@ mod tests {
 
     #[test]
     fn check_formula_p_implies_q() {
-        assert_eq!(check_formula("P=>Q"), "Valid formula: P=>Q");
+        assert_eq!(check_formula("P->Q"), "Valid formula: P->Q");
     }
 
     #[test]
@@ -353,7 +357,7 @@ mod tests {
 
     #[test]
     fn check_formula_no_parens_falls_back_to_formula() {
-        assert_eq!(check_formula_symbol("P=>Q"), "Valid formula: P=>Q");
+        assert_eq!(check_formula_symbol("P->Q"), "Valid formula: P->Q");
     }
 
     #[test]
@@ -363,7 +367,7 @@ mod tests {
 
     #[test]
     fn check_formula_not_implication() {
-        assert_eq!(check_formula_symbol("not(A => B)"), "Valid formula: \u{00AC}(A => B)");
+        assert_eq!(check_formula_symbol("not(A -> B)"), "Valid formula: \u{00AC}(A -> B)");
     }
 
     #[test]
@@ -394,12 +398,12 @@ mod tests {
     #[test]
     fn tautological_proof_p_implies_q_is_not_tautology() {
         // P=>Q is false when P=true, Q=false
-        assert_eq!(tautological_proof("P=>Q"), "Not a tautology: P=>Q");
+        assert_eq!(tautological_proof("P->Q"), "Not a tautology: P->Q");
     }
 
     #[test]
     fn tautological_proof_p_implies_p_is_tautology() {
         // P=>P is true under every assignment
-        assert_eq!(tautological_proof("P=>P"), "Tautology: P=>P");
+        assert_eq!(tautological_proof("P->P"), "Tautology: P->P");
     }
 }

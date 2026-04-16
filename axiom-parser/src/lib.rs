@@ -11,7 +11,7 @@ use formalisms::{
 /// formula  := quantifier | negation | combination | atomic
 /// quantifier := ('∀' | 'Ǝ') variable '.' formula
 /// negation   := '\u{00AC}' formula
-/// combination := '(' formula ('∧'|'∨'|'/\'|'\/'|'=>'|'<=>'|'==') formula ')'
+/// combination := '(' formula ('∧'|'∨'|'/\'|'\/'|'->'|'<->'|'=') formula ')'
 /// atomic     := variable | relation | constant
 /// relation   := name '(' term (',' term)* ')'
 /// term       := variable | constant | operation
@@ -149,7 +149,7 @@ impl Parser {
     /// Reads one of the recognised binary connectives (`<=>`, `=>`, `∧`, `∨`, `==`).
     fn binary_connective(&mut self) -> Result<String> {
         self.skip_ws();
-        for op in &["<=>", "=>", "\u{2227}", "\u{2228}", "=="] {
+        for op in &["<->", "->", "\u{2227}", "\u{2228}", "="] {
             if self.rest().starts_with(op) {
                 self.pos += op.len();
                 return Ok(op.to_string());
@@ -224,10 +224,16 @@ impl Parser {
     /// is followed by `(` (which signals a relation/operation name instead).
     pub fn try_parse_variable(&mut self) -> Result<Option<individual_variable>> {
         let start = self.pos;
-        if let Some(c) = self.rest().chars().next() {
-            if c.is_ascii_uppercase() {
+        if let Some(c) = self.rest().chars().next()
+            && c.is_ascii_uppercase() {
                 self.pos += c.len_utf8();
-                while self.rest().starts_with('\'') { self.pos += 1; }
+                while let Some(c) = self.rest().chars().next() {
+                    if c.is_alphanumeric() || c == '_' || c == '\'' {
+                        self.pos += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
                 let s = self.input[start..self.pos].to_string();
                 self.skip_ws();
                 if !self.rest().starts_with('(') {
@@ -235,20 +241,25 @@ impl Parser {
                     return Ok(Some(v));
                 }
                 self.pos = start;
-            }
         }
         Ok(None)
     }
 
     /// Parses an individual variable token: an uppercase ASCII letter followed by zero
-    /// or more prime (`'`) characters.
+    /// or more letters, digits, underscores, or apostrophes.
     fn individual_variable(&mut self) -> Result<individual_variable> {
         self.skip_ws();
         let start = self.pos;
         match self.rest().chars().next() {
             Some(c) if c.is_ascii_uppercase() => {
                 self.pos += c.len_utf8();
-                while self.rest().starts_with('\'') { self.pos += 1; }
+                while let Some(c) = self.rest().chars().next() {
+                    if c.is_alphanumeric() || c == '_' || c == '\'' {
+                        self.pos += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
                 individual_variable::new(&self.input[start..self.pos])
             }
             _ => anyhow::bail!("expected individual variable at position {}", self.pos),
@@ -305,8 +316,8 @@ mod tests {
     fn parse_formula_combination() {
         assert!(matches!(parse_formula("(A ∧ B)"), Ok(FormulaType::Combination(_, _))));
         assert!(matches!(parse_formula("(A ∨ B)"), Ok(FormulaType::Combination(_, _))));
-        assert!(matches!(parse_formula("(A => B)"), Ok(FormulaType::Combination(_, _))));
-        assert!(matches!(parse_formula("(A <=> B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(A -> B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(A <-> B)"), Ok(FormulaType::Combination(_, _))));
     }
 
     #[test]
@@ -317,24 +328,24 @@ mod tests {
 
     #[test]
     fn parse_formula_nested() {
-        assert!(matches!(parse_formula("(¬A => B)"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(¬A -> B)"), Ok(FormulaType::Combination(_, _))));
         assert!(matches!(parse_formula("∀X.(A ∧ B)"), Ok(FormulaType::Quantifier(_, _, _))));
     }
 
     #[test]
     fn parse_formula_invalid() {
         assert!(parse_formula("").is_err());
-        assert!(parse_formula("ABC").is_err());
+        assert!(parse_formula("123").is_err());
     }
 
     #[test]
     fn parse_formula_auto_parenthesized() {
         assert!(parse_formula("(A)").is_ok());
-        assert!(parse_formula("P=>Q").is_ok());
+        assert!(parse_formula("P->Q").is_ok());
     }
 
     #[test]
     fn parse_formula_implication_p_implies_q() {
-        assert!(matches!(parse_formula("P=>Q"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("P->Q"), Ok(FormulaType::Combination(_, _))));
     }
 }

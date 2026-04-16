@@ -86,9 +86,13 @@ impl atom {
 
 impl fmt::Display for atom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}(", self.predicate.0.symbol)?;
-        fmt_terms(&self.terms, f)?;
-        write!(f, ")")
+        if self.terms.is_empty() {
+            write!(f, "{}", self.predicate.0.symbol)
+        } else {
+            write!(f, "{}(", self.predicate.0.symbol)?;
+            fmt_terms(&self.terms, f)?;
+            write!(f, ")")
+        }
     }
 }
 
@@ -138,15 +142,21 @@ impl is_ground for atom {
     }
 }
 
-/// A `literal` is either a positive or negative occurrence of a predicate applied to terms.
-/// A `positive_literal` is an `atom` — a predicate symbol applied to terms with no negation.
-/// A `negative_literal` is a predicate symbol preceded by negation ("not", '-', or '¬');
-/// it shares the structure of an atom but is not one.
+/// A `literal` is either a positive or negative occurrence of a predicate applied to terms,
+/// a strict-equality test between two terms (`lhs=rhs`), a disjunction of two literal
+/// branches (`(lhs_branch ; rhs_branch)`), or a negation-as-failure of a conjunction.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone)]
 pub enum literal {
     positive_literal(atom),
     negative_literal(predicate_symbol, Vec<term>),
+    /// `lhs=rhs` — Prolog structural equality.
+    equality_literal(term, term),
+    /// `(branch1 ; branch2 ; …)` — n-way Prolog disjunction in a rule body.
+    /// Each inner `Vec<literal>` is one branch (an implicit conjunction of literals).
+    disjunction(Vec<Vec<literal>>),
+    /// `\+(goal)` — negation-as-failure of a conjunction of literals.
+    naf(Vec<literal>),
 }
 
 impl literal {
@@ -172,6 +182,28 @@ impl fmt::Display for literal {
                 fmt_terms(terms, f)?;
                 write!(f, ")")
             }
+            literal::equality_literal(lhs, rhs) => {
+                write!(f, "{} = {}", term_name(lhs), term_name(rhs))
+            }
+            literal::disjunction(branches) => {
+                write!(f, "(")?;
+                for (i, branch) in branches.iter().enumerate() {
+                    if i > 0 { write!(f, " ; ")?; }
+                    for (j, lit) in branch.iter().enumerate() {
+                        if j > 0 { write!(f, ", ")?; }
+                        write!(f, "{lit}")?;
+                    }
+                }
+                write!(f, ")")
+            }
+            literal::naf(lits) => {
+                write!(f, "~(")?;
+                for (i, lit) in lits.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{lit}")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -181,6 +213,11 @@ impl is_ground for literal {
         match self {
             literal::positive_literal(a) => a.is_ground(),
             literal::negative_literal(_, terms) => terms.iter().all(|t| t.is_ground()),
+            literal::equality_literal(lhs, rhs) => lhs.is_ground() && rhs.is_ground(),
+            literal::disjunction(branches) => {
+                branches.iter().all(|branch| branch.iter().all(|l| l.is_ground()))
+            }
+            literal::naf(lits) => lits.iter().all(|l| l.is_ground()),
         }
     }
 }
@@ -202,12 +239,39 @@ fn literal_to_formula(lit: &literal) -> Result<Formula> {
             let not = logical_symbol::new("\u{00AC}".to_string())?;
             Ok(Formula { formula_type: FormulaType::Combination(not, vec![inner]), value: None })
         }
+        literal::equality_literal(lhs, rhs) => {
+            let eq = logical_symbol::new("==".to_string())?;
+            let lhs_f = Formula { formula_type: FormulaType::Term(lhs.clone()), value: None };
+            let rhs_f = Formula { formula_type: FormulaType::Term(rhs.clone()), value: None };
+            Ok(Formula { formula_type: FormulaType::Combination(eq, vec![lhs_f, rhs_f]), value: None })
+        }
+        literal::disjunction(branches) => {
+            let mut formulas = branches.iter()
+                .map(|branch| literals_to_conjunction(branch))
+                .collect::<Result<Vec<_>>>()?;
+            formulas.reverse();
+            let mut acc = formulas.remove(0);
+            for f in formulas {
+                let or = logical_symbol::new("\u{2228}".to_string())?;
+                acc = Formula { formula_type: FormulaType::Combination(or, vec![f, acc]), value: None };
+            }
+            Ok(acc)
+        }
+        literal::naf(lits) => {
+            let inner = literals_to_conjunction(lits)?;
+            let not = logical_symbol::new("\u{00AC}".to_string())?;
+            Ok(Formula { formula_type: FormulaType::Combination(not, vec![inner]), value: None })
+        }
     }
 }
 
 fn predicate_to_formula(pred: &predicate_symbol, terms: &[term]) -> Result<Formula> {
     let rank = pred.0.rank;
     if rank == 0 {
+        if let Ok(v) = individual_variable::new(&pred.0.symbol) {
+            let t = term { term_type: TermType::Variable(v) };
+            return Ok(Formula { formula_type: FormulaType::Term(t), value: None });
+        }
         let c = individual_constant::new(pred.0.symbol.clone())?;
         let t = term { term_type: TermType::Constant(c) };
         Ok(Formula { formula_type: FormulaType::Term(t), value: None })
@@ -247,7 +311,7 @@ fn build_rule_formula(head: &[literal], body: &[literal]) -> Result<Formula> {
         (false, false) => {
             let body_f = literals_to_conjunction(body)?;
             let head_f = literals_to_conjunction(head)?;
-            let implies = logical_symbol::new("=>".to_string())?;
+            let implies = logical_symbol::new("->".to_string())?;
             Ok(Formula {
                 formula_type: FormulaType::Combination(implies, vec![body_f, head_f]),
                 value: None,
@@ -419,6 +483,18 @@ fn substitute_literal(lit: literal, vars: &[individual_variable], subs: &[term])
         literal::negative_literal(p, terms) => {
             literal::negative_literal(p, substitute_terms(terms, vars, subs))
         }
+        literal::equality_literal(lhs, rhs) => literal::equality_literal(
+            substitute_term(lhs, vars, subs),
+            substitute_term(rhs, vars, subs),
+        ),
+        literal::disjunction(branches) => literal::disjunction(
+            branches.into_iter()
+                .map(|branch| branch.into_iter().map(|l| substitute_literal(l, vars, subs)).collect())
+                .collect(),
+        ),
+        literal::naf(lits) => literal::naf(
+            lits.into_iter().map(|l| substitute_literal(l, vars, subs)).collect()
+        ),
     }
 }
 
@@ -435,11 +511,26 @@ fn collect_variables_term(t: &term, seen: &mut Vec<individual_variable>) {
 }
 
 fn collect_variables_literal(lit: &literal, seen: &mut Vec<individual_variable>) {
-    let terms = match lit {
-        literal::positive_literal(a) => &a.terms,
-        literal::negative_literal(_, terms) => terms,
-    };
-    for t in terms { collect_variables_term(t, seen); }
+    match lit {
+        literal::positive_literal(a) => {
+            for t in &a.terms { collect_variables_term(t, seen); }
+        }
+        literal::negative_literal(_, terms) => {
+            for t in terms { collect_variables_term(t, seen); }
+        }
+        literal::equality_literal(lhs, rhs) => {
+            collect_variables_term(lhs, seen);
+            collect_variables_term(rhs, seen);
+        }
+        literal::disjunction(branches) => {
+            for branch in branches {
+                for lit in branch { collect_variables_literal(lit, seen); }
+            }
+        }
+        literal::naf(lits) => {
+            for lit in lits { collect_variables_literal(lit, seen); }
+        }
+    }
 }
 
 impl rule {
@@ -498,6 +589,21 @@ fn json_literal(lit: &literal) -> String {
             let ts: Vec<String> = terms.iter().map(json_term).collect();
             format!(r#"{{"polarity":"negative","predicate":"{}","terms":[{}]}}"#,
                 p.0.symbol, ts.join(","))
+        }
+        literal::equality_literal(lhs, rhs) =>
+            format!(r#"{{"type":"equality","lhs":{},"rhs":{}}}"#, json_term(lhs), json_term(rhs)),
+        literal::disjunction(branches) => {
+            let branches_json: Vec<String> = branches.iter()
+                .map(|branch| {
+                    let lits: Vec<String> = branch.iter().map(json_literal).collect();
+                    format!("[{}]", lits.join(","))
+                })
+                .collect();
+            format!(r#"{{"type":"disjunction","branches":[{}]}}"#, branches_json.join(","))
+        }
+        literal::naf(lits) => {
+            let ls: Vec<String> = lits.iter().map(json_literal).collect();
+            format!(r#"{{"type":"naf","goal":[{}]}}"#, ls.join(","))
         }
     }
 }
@@ -899,7 +1005,7 @@ mod tests {
     fn rule_to_json() {
         let r = crate::parse::parse_rule("happy(A) :- lego_builder(A), enjoys_lego(A)").unwrap();
         let json = r.to_json();
-        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}],"formula":{"type":"combination","connective":"=>","operands":[{"type":"combination","connective":"∧","operands":[{"type":"relation","symbol":"lego_builder","terms":[{"type":"variable","name":"A"}]},{"type":"relation","symbol":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}]},{"type":"relation","symbol":"happy","terms":[{"type":"variable","name":"A"}]}]}}"#);
+        assert_eq!(json, r#"{"rule_type":"General","head":[{"polarity":"positive","atom":{"predicate":"happy","terms":[{"type":"variable","name":"A"}]}}],"body":[{"polarity":"positive","atom":{"predicate":"lego_builder","terms":[{"type":"variable","name":"A"}]}},{"polarity":"positive","atom":{"predicate":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}}],"formula":{"value":null,"type":"combination","connective":"->","operands":[{"value":null,"type":"combination","connective":"∧","operands":[{"value":null,"type":"relation","symbol":"lego_builder","terms":[{"type":"variable","name":"A"}]},{"value":null,"type":"relation","symbol":"enjoys_lego","terms":[{"type":"variable","name":"A"}]}]},{"value":null,"type":"relation","symbol":"happy","terms":[{"type":"variable","name":"A"}]}]}}"#);
     }
 
     #[test]

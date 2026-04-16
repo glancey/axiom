@@ -10,6 +10,23 @@ A CLI tool for constructing, validating, and evaluating well-formed formulas (wf
 | `formalisms` | Core domain types and formula evaluation |
 | `axiom_parser` | Recursive-descent formula parser |
 | `axiom-syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
+| `axiom-prolog` | Formal grammar-to-Prolog format compiler and interactive query REPL |
+
+## Running axiom
+
+Before building, the `scryer-prolog` dependency in [axiom-prolog/Cargo.toml](axiom-prolog/Cargo.toml) must point to a local clone of the source:
+
+```toml
+scryer-prolog = { path = "/path/to/scryer-prolog", default-features = false }
+```
+
+Clone the source with:
+
+```sh
+git clone https://github.com/mthom/scryer-prolog.git
+```
+
+Then update the `path` in `axiom-prolog/Cargo.toml` to match the location of your clone.
 
 ## Installation
 
@@ -59,11 +76,11 @@ axiom check-formula <value>
 **Examples:**
 
 ```sh
-axiom check-formula "P=>Q"
-# Valid formula: P=>Q
+axiom check-formula "P->Q"
+# Valid formula: P->Q
 
-axiom check-formula "not(A => B)"
-# Valid formula: ¬(A => B)
+axiom check-formula "not(A -> B)"
+# Valid formula: ¬(A -> B)
 
 axiom check-formula "rel(a, b)"
 # relation_symbol(rel, rank=2), args: ["a", "b"]
@@ -83,14 +100,14 @@ axiom tautological-proof <value>
 **Examples:**
 
 ```sh
-axiom tautological-proof "P=>P"
-# Tautology: P=>P
+axiom tautological-proof "P->P"
+# Tautology: P->P
 
-axiom tautological-proof "P=>Q"
-# Not a tautology: P=>Q
+axiom tautological-proof "P->Q"
+# Not a tautology: P->Q
 
-axiom tautological-proof "(not(P and Q) <=> (notP or notQ))"
-# Tautology: (not(P and Q) <=> (notP or notQ))
+axiom tautological-proof "(not(P and Q) <-> (notP or notQ))"
+# Tautology: (not(P and Q) <-> (notP or notQ))
 ```
 
 ---
@@ -173,6 +190,55 @@ axiom glossary
 
 ---
 
+## axiom-prolog
+
+`axiom-prolog` compiles `.apl` source files to standard Prolog (`.pl`) and provides an interactive query REPL backed by [scryer-prolog](https://github.com/mthom/scryer-prolog).
+
+`.apl` files may use either Prolog-style syntax (`head :- body`) or axiom formula syntax (`(body) -> (head)`). Each line is converted to canonical Prolog by `to_prolog_string`.
+
+### `query`
+
+Loads a `.pl` Prolog file and starts an interactive query REPL.
+
+```sh
+axiom-prolog query
+# Prolog file path: facts.pl
+# Loaded 'facts.pl' as module 'facts'.
+# Enter a Prolog query (e.g. member(X, [1,2,3]).) or Ctrl-D to quit.
+#
+# ?- happy(alice).
+```
+
+Queries may be entered in Prolog syntax or axiom formula syntax; axiom inputs are converted via `to_prolog_string` before being run.
+
+---
+
+### `compile`
+
+Converts a `.apl` source file to a `.pl` file by running each line through `to_prolog_string`.
+
+```sh
+axiom-prolog compile
+# File path (.apl): rules.apl
+# Compiled 'rules.apl' → 'rules.pl'
+```
+
+**Example `.apl` input:**
+
+```text
+is_weekday(monday).
+(Day = saturday or Day = sunday) -> is_weekend(Day)
+```
+
+**Compiled `.pl` output:**
+
+```prolog
+is_weekday(monday).
+is_weekend(Day) :- (Day = saturday ; Day = sunday).
+```
+
+---
+
 ## Formula Grammar
 
 ```text
@@ -187,10 +253,10 @@ operation   := name '(' term (',' term)* ')'
 constant    := name
 variable    := [A-Z] '\''*
 name        := [a-z][a-zA-Z0-9_]*
-connective  := '<=>' | '=>' | '∧' | '∨' | '=='
+connective  := '<->' | '->' | '∧' | '∨' | '='
 ```
 
-Binary combinations must be **fully parenthesized**: `(A => B)`, not `A => B`.
+Binary combinations must be **fully parenthesized**: `(A -> B)`, not `A -> B`.
 A single formula in parentheses `(A)` is unwrapped transparently.
 
 ### Natural-language aliases
@@ -206,6 +272,8 @@ The parser and CLI normalize the following before parsing:
 | ` not ` | `¬` |
 | `not(expr)` | `¬(expr)` |
 | `notX` (X uppercase) | `¬X` |
+| `~(expr)` | `¬(expr)` |
+| `~X` | `¬X` |
 
 ---
 
