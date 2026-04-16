@@ -12,6 +12,22 @@ A CLI tool for constructing, validating, and evaluating well-formed formulas (wf
 | `axiom-syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
 | `axiom-prolog` | Formal grammar-to-Prolog format compiler and interactive query REPL |
 
+## Running axiom
+
+Before building, the `scryer-prolog` dependency in [axiom-prolog/Cargo.toml](axiom-prolog/Cargo.toml) must point to a local clone of the source:
+
+```toml
+scryer-prolog = { path = "/path/to/scryer-prolog", default-features = false }
+```
+
+Clone the source with:
+
+```sh
+git clone https://github.com/mthom/scryer-prolog.git
+```
+
+Then update the `path` in `axiom-prolog/Cargo.toml` to match the location of your clone.
+
 ## Installation
 
 ```sh
