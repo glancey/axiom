@@ -86,9 +86,13 @@ impl atom {
 
 impl fmt::Display for atom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}(", self.predicate.0.symbol)?;
-        fmt_terms(&self.terms, f)?;
-        write!(f, ")")
+        if self.terms.is_empty() {
+            write!(f, "{}", self.predicate.0.symbol)
+        } else {
+            write!(f, "{}(", self.predicate.0.symbol)?;
+            fmt_terms(&self.terms, f)?;
+            write!(f, ")")
+        }
     }
 }
 
@@ -139,18 +143,20 @@ impl is_ground for atom {
 }
 
 /// A `literal` is either a positive or negative occurrence of a predicate applied to terms,
-/// a strict-equality test between two terms (`lhs==rhs`), or a disjunction of two literal
-/// branches (`(lhs_branch ; rhs_branch)`).
+/// a strict-equality test between two terms (`lhs=rhs`), a disjunction of two literal
+/// branches (`(lhs_branch ; rhs_branch)`), or a negation-as-failure of a conjunction.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone)]
 pub enum literal {
     positive_literal(atom),
     negative_literal(predicate_symbol, Vec<term>),
-    /// `lhs==rhs` — Prolog strict structural equality.
+    /// `lhs=rhs` — Prolog structural equality.
     equality_literal(term, term),
     /// `(branch1 ; branch2 ; …)` — n-way Prolog disjunction in a rule body.
     /// Each inner `Vec<literal>` is one branch (an implicit conjunction of literals).
     disjunction(Vec<Vec<literal>>),
+    /// `\+(goal)` — negation-as-failure of a conjunction of literals.
+    naf(Vec<literal>),
 }
 
 impl literal {
@@ -190,6 +196,14 @@ impl fmt::Display for literal {
                 }
                 write!(f, ")")
             }
+            literal::naf(lits) => {
+                write!(f, "~(")?;
+                for (i, lit) in lits.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{lit}")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -203,6 +217,7 @@ impl is_ground for literal {
             literal::disjunction(branches) => {
                 branches.iter().all(|branch| branch.iter().all(|l| l.is_ground()))
             }
+            literal::naf(lits) => lits.iter().all(|l| l.is_ground()),
         }
     }
 }
@@ -242,12 +257,21 @@ fn literal_to_formula(lit: &literal) -> Result<Formula> {
             }
             Ok(acc)
         }
+        literal::naf(lits) => {
+            let inner = literals_to_conjunction(lits)?;
+            let not = logical_symbol::new("\u{00AC}".to_string())?;
+            Ok(Formula { formula_type: FormulaType::Combination(not, vec![inner]), value: None })
+        }
     }
 }
 
 fn predicate_to_formula(pred: &predicate_symbol, terms: &[term]) -> Result<Formula> {
     let rank = pred.0.rank;
     if rank == 0 {
+        if let Ok(v) = individual_variable::new(&pred.0.symbol) {
+            let t = term { term_type: TermType::Variable(v) };
+            return Ok(Formula { formula_type: FormulaType::Term(t), value: None });
+        }
         let c = individual_constant::new(pred.0.symbol.clone())?;
         let t = term { term_type: TermType::Constant(c) };
         Ok(Formula { formula_type: FormulaType::Term(t), value: None })
@@ -468,6 +492,9 @@ fn substitute_literal(lit: literal, vars: &[individual_variable], subs: &[term])
                 .map(|branch| branch.into_iter().map(|l| substitute_literal(l, vars, subs)).collect())
                 .collect(),
         ),
+        literal::naf(lits) => literal::naf(
+            lits.into_iter().map(|l| substitute_literal(l, vars, subs)).collect()
+        ),
     }
 }
 
@@ -499,6 +526,9 @@ fn collect_variables_literal(lit: &literal, seen: &mut Vec<individual_variable>)
             for branch in branches {
                 for lit in branch { collect_variables_literal(lit, seen); }
             }
+        }
+        literal::naf(lits) => {
+            for lit in lits { collect_variables_literal(lit, seen); }
         }
     }
 }
@@ -570,6 +600,10 @@ fn json_literal(lit: &literal) -> String {
                 })
                 .collect();
             format!(r#"{{"type":"disjunction","branches":[{}]}}"#, branches_json.join(","))
+        }
+        literal::naf(lits) => {
+            let ls: Vec<String> = lits.iter().map(json_literal).collect();
+            format!(r#"{{"type":"naf","goal":[{}]}}"#, ls.join(","))
         }
     }
 }

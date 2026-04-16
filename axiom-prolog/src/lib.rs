@@ -10,12 +10,13 @@ use serde_json::{json, Value};
 /// formula rule (`(body) => (head)`), then returns the canonical Prolog string
 /// terminated with a period. Falls back to `normalize_for_parse` if neither parse succeeds.
 pub fn to_prolog_string(input: &str) -> String {
-    let rule_str = if input.contains("->") {
-        parse_formula_as_rule(input).map(|r| r.to_string())
+    let normalized = normalize_for_parse(input);
+    let rule_str = if normalized.contains("->") {
+        parse_formula_as_rule(&normalized).map(|r| r.to_string())
     } else {
-        parse_rule(input).map(|r| r.to_string())
+        parse_rule(&normalized).map(|r| r.to_string())
     }
-    .unwrap_or_else(|_| normalize_for_parse(input));
+    .unwrap_or_else(|_| normalized);
 
     let rule_str = rule_str
         .strip_prefix('(')

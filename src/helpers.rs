@@ -76,7 +76,7 @@ pub fn normalize_for_parse(s: &str) -> String {
     if !n.starts_with('(') { format!("({n})") } else { n }
 }
 
-/// Parses a rule string in either Prolog style or formula (`=>`) style.
+/// Parses a rule string in either Prolog style or formula (`->`) style.
 pub fn parse_rule_input(s: &str) -> Result<axiom_syntalog::rule> {
     if s.contains("->") { parse_formula_as_rule(s) } else { parse_rule(s) }
 }

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use formalisms::{term, TermType, FormulaType};
+use formalisms::{term, TermType, FormulaType, operation_symbol};
 use crate::{predicate_symbol, atom, literal, rule};
 use axiom_parser::Parser;
 
@@ -315,8 +315,9 @@ fn formula_type_to_term(ft: FormulaType) -> Result<term> {
 ///
 /// - `Relation(r, terms)` → positive literal with predicate `r` applied to `terms`.
 /// - `Term(constant)` → zero-arity positive literal.
-/// - `Combination(¬, [inner])` → negative literal wrapping the inner atom.
-/// - `Combination(==, [lhs, rhs])` → equality literal.
+/// - `Combination(¬, [atom])` → negative literal wrapping the inner atom.
+/// - `Combination(¬, [compound])` → `naf` literal (negation-as-failure of a conjunction).
+/// - `Combination(=, [lhs, rhs])` → equality literal.
 fn formula_type_to_literal(ft: FormulaType) -> Result<literal> {
     match ft {
         // Positive: relation atom, e.g. happy(A)
@@ -325,14 +326,19 @@ fn formula_type_to_literal(ft: FormulaType) -> Result<literal> {
             let a = atom::new(pred, terms)?;
             Ok(literal::positive_literal(a))
         }
-        // Positive: zero-arity constant used as a propositional atom, e.g. "sunny"
+        // Positive: zero-arity propositional atom — constant (e.g. "sunny") or variable (e.g. "P")
         FormulaType::Term(t) => match t.term_type {
             TermType::Constant(c) => {
                 let pred = predicate_symbol::new(c.0.symbol, 0)?;
                 let a = atom::new(pred, vec![])?;
                 Ok(literal::positive_literal(a))
             }
-            _ => anyhow::bail!("individual variables cannot appear as bare literals in a rule"),
+            TermType::Variable(v) => {
+                let pred = predicate_symbol(operation_symbol { symbol: v.name, rank: 0 });
+                let a = atom::new(pred, vec![])?;
+                Ok(literal::positive_literal(a))
+            }
+            _ => anyhow::bail!("unexpected term type as bare literal"),
         },
         // Negative: ¬atom
         FormulaType::Combination(sym, mut parts)
@@ -349,9 +355,16 @@ fn formula_type_to_literal(ft: FormulaType) -> Result<literal> {
                         let pred = predicate_symbol::new(c.0.symbol, 0)?;
                         Ok(literal::negative(pred, vec![])?)
                     }
-                    _ => anyhow::bail!("individual variables cannot appear as bare literals in a rule"),
+                    TermType::Variable(v) => {
+                        let pred = predicate_symbol(operation_symbol { symbol: v.name, rank: 0 });
+                        Ok(literal::negative(pred, vec![])?)
+                    }
+                    _ => anyhow::bail!("unexpected term type as bare literal"),
                 },
-                _ => anyhow::bail!("negation (¬) must wrap an atom, not a compound formula"),
+                compound => {
+                    let lits = flatten_conjunction(compound)?;
+                    Ok(literal::naf(lits))
+                }
             }
         }
         // Equality: lhs=rhs

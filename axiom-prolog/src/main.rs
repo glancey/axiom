@@ -11,8 +11,6 @@ struct Cli {
 enum Commands {
     /// Load a Prolog file and start an interactive query REPL
     Query,
-    /// Normalize a string and print it as a Prolog-ready query
-    Normalize,
     /// Compile a .apl file to a .pl file by converting each line with to_prolog_string
     Compile,
 }
@@ -32,10 +30,6 @@ fn main() {
         Commands::Query => {
             let path = prompt("Prolog file path: ");
             axiom_prolog::query(std::path::PathBuf::from(path));
-        }
-        Commands::Normalize => {
-            let input = prompt("Input: ");
-            println!("{}", axiom_prolog::to_prolog_string(&input));
         }
         Commands::Compile => {
             let path = prompt("File path (.apl): ");

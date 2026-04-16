@@ -54,7 +54,7 @@ enum Commands {
         rule: Vec<String>,
     },
     /// Parse a rule and print its JSON serialization.
-    /// Accepts either `h1, …, hn :- b1, …, bm` or the formula form `(b1 and … and bm) => (h1 and … and hn)`
+    /// Accepts either `h1, …, hn :- b1, …, bm` or the formula form `(b1 and … and bm) -> (h1 and … and hn)`
     SerializeRule {
         /// The rule string — Prolog style or formula style
         #[arg(trailing_var_arg = true)]
@@ -74,6 +74,23 @@ enum Commands {
         #[arg(trailing_var_arg = true)]
         formulas: Vec<String>,
     },
+}
+
+/// Finds the byte offset of the first `->` that is not nested inside parentheses.
+fn find_top_level_arrow(s: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => { if depth > 0 { depth -= 1; } }
+            b'-' if depth == 0 && bytes[i + 1] == b'>' => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 fn main() -> Result<()> {
@@ -177,7 +194,7 @@ fn main() -> Result<()> {
 
         }
         Commands::Substitution { terms, rule } => {
-            let rule_str = rule.join(" ");
+            let rule_str = normalize_formula(&rule.join(" "));
             match parse_rule_input(&rule_str) {
                 Err(e) => println!("Error parsing rule: {e}"),
                 Ok(r) => {
@@ -189,21 +206,21 @@ fn main() -> Result<()> {
                         Err(e) => println!("Error parsing terms: {e}"),
                         Ok(subs) => match r.substitution(subs) {
                             Err(e) => println!("Error: {e}"),
-                            Ok(r2) => println!("{}", r2.to_json_pretty()),
+                            Ok(r2) => println!("{r2}\n{}", r2.to_json_pretty()),
                         },
                     }
                 }
             }
         }
         Commands::SerializeRule { tokens } => {
-            let input = tokens.join(" ");
+            let input = normalize_formula(&tokens.join(" "));
             match parse_rule_input(&input) {
                 Ok(r) => println!("{}", r.to_json_pretty()),
                 Err(e) => println!("Error: {e}"),
             }
         }
         Commands::ValidateRule { tokens } => {
-            let input = tokens.join(" ");
+            let input = normalize_formula(&tokens.join(" "));
             match parse_rule_input(&input) {
                 Err(e) => println!("Error parsing rule: {e}"),
                 Ok(r) => {
@@ -226,13 +243,14 @@ fn main() -> Result<()> {
             }
         }
         Commands::ValidateArgument { formulas } => {
-            let input = formulas.join(" ");
-            let (premises_str, conclusion_str) = match input.split_once(" :: ") {
-                Some((p, c)) => (p, c),
-                None => {
-                    println!("Expected format: <premise> . <premise> :: <conclusion>");
-                    return Ok(());
-                }
+            let input = normalize_formula(&formulas.join(" "));
+            let (premises_str, conclusion_str) = if let Some((p, c)) = input.split_once(" :: ") {
+                (p.to_string(), c.to_string())
+            } else if let Some(arrow) = find_top_level_arrow(&input) {
+                (input[..arrow].trim().to_string(), input[arrow + 2..].trim().to_string())
+            } else {
+                println!("Expected format: <premise> . <premise> :: <conclusion>");
+                return Ok(());
             };
 
             let normalized_premises: Vec<String> = premises_str.split(" . ")
