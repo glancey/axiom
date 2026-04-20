@@ -1,0 +1,11 @@
+[package]
+name = "axiom-hypothes"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+formalisms = { path = "../formalisms" }
+axiom-parser = { path = "../axiom-parser" }
+anyhow = "1"
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
