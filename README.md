@@ -11,6 +11,7 @@ A CLI tool for constructing, validating, and evaluating well-formed formulas (wf
 | `axiom_parser` | Recursive-descent formula parser |
 | `axiom-syntalog` | Clausal logic — rules, atoms, literals, substitution ([docs](syntalog/SYNTALOG.md)) |
 | `axiom-prolog` | Formal grammar-to-Prolog format compiler and interactive query REPL |
+| `axiom-hypothes` | JSON stock-data parser — converts JSON to axiom-syntalog `term` structures |
 
 ## Running axiom
 

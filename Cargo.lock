@@ -98,6 +98,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-hypothes"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axiom-parser",
+ "clap",
+ "formalisms",
+ "serde_json",
+]
+
+[[package]]
 name = "axiom-parser"
 version = "0.1.0"
 dependencies = [
