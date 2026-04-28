@@ -84,7 +84,7 @@ fn find_top_level_arrow(s: &str) -> Option<usize> {
     while i + 1 < bytes.len() {
         match bytes[i] {
             b'(' => depth += 1,
-            b')' => { if depth > 0 { depth -= 1; } }
+            b')' => { depth = depth.saturating_sub(1); }
             b'-' if depth == 0 && bytes[i + 1] == b'>' => return Some(i),
             _ => {}
         }
@@ -154,7 +154,7 @@ fn main() -> Result<()> {
                 }
             } else {
                 let is_symbol_application = normalized
-                    .chars().next().map_or(false, |c| c.is_ascii_lowercase())
+                    .chars().next().is_some_and(|c| c.is_ascii_lowercase())
                     && normalized.contains('(');
                 let formula_str = if is_symbol_application {
                     if let Ok((sym, args)) = parse_relation_symbol(&normalized) {
@@ -167,8 +167,7 @@ fn main() -> Result<()> {
                 } else {
                     normalized
                 };
-                let parse_str = if !formula_str.starts_with('(') { format!("({formula_str})") } else { formula_str.clone() };
-                match parse_formula(&parse_str) {
+                match parse_formula(&formula_str) {
                     Ok(ft) => println!("Valid formula: {formula_str}\n{ft:#?}"),
                     Err(e) => println!("Invalid formula: {e}"),
                 }

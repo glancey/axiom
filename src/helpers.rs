@@ -70,10 +70,8 @@ pub fn parse_symbol_args(s: &str, kind: &str) -> Result<(String, Vec<String>)> {
     Ok((name, args))
 }
 
-/// Normalizes and wraps a formula string in parentheses for parsing.
 pub fn normalize_for_parse(s: &str) -> String {
-    let n = normalize_formula(s);
-    if !n.starts_with('(') { format!("({n})") } else { n }
+    normalize_formula(s)
 }
 
 /// Parses a rule string in either Prolog style or formula (`->`) style.

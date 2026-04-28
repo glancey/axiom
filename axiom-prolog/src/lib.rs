@@ -7,16 +7,24 @@ use scryer_prolog::{LeafAnswer, MachineBuilder, Term};
 use serde_json::{json, Value};
 
 /// Parses `input` as either a Prolog-style rule (`head :- body`) or an axiom
-/// formula rule (`(body) => (head)`), then returns the canonical Prolog string
-/// terminated with a period. Falls back to `normalize_for_parse` if neither parse succeeds.
+/// formula rule (`body -> head`), then returns the canonical Prolog string
+/// terminated with a period. Prints a warning to stderr and returns the raw
+/// input (with `.`) if neither parse succeeds.
 pub fn to_prolog_string(input: &str) -> String {
     let normalized = normalize_for_parse(input);
-    let rule_str = if normalized.contains("->") {
+    let result = if normalized.contains("->") {
         parse_formula_as_rule(&normalized).map(|r| r.to_string())
     } else {
         parse_rule(&normalized).map(|r| r.to_string())
-    }
-    .unwrap_or_else(|_| normalized);
+    };
+
+    let rule_str = match result {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("warning: could not parse {:?}: {e}", input.trim());
+            normalized
+        }
+    };
 
     let rule_str = rule_str
         .strip_prefix('(')
@@ -46,7 +54,7 @@ pub fn compile(path: PathBuf) {
 
     let output: Vec<String> = source
         .lines()
-        .map(|line| to_prolog_string(line))
+        .map(|line| if line.trim().is_empty() { String::new() } else { to_prolog_string(line) })
         .collect();
 
     let out_path = path.with_extension("pl");
@@ -137,10 +145,8 @@ pub fn query(path: PathBuf) {
         let mut answers: Vec<Value> = machine.run_query(query).map(answer_to_json).collect();
         // scryer-prolog appends a final False to signal "no more solutions"; drop it
         // when preceding answers exist so False only appears for genuinely failed queries.
-        if answers.len() > 1 {
-            if answers.last() == Some(&json!({ "result": false })) {
-                answers.pop();
-            }
+        if answers.len() > 1 && answers.last() == Some(&json!({ "result": false })) {
+            answers.pop();
         }
 
         println!("{}", serde_json::to_string_pretty(&answers).unwrap());

@@ -6,19 +6,23 @@ use formalisms::{
 
 /// Parses a string into a [`FormulaType`].
 ///
-/// # Grammar
+/// # Grammar (precedence, lowest → highest)
 /// ```text
-/// formula  := quantifier | negation | combination | atomic
+/// formula    := iff
+/// iff        := implies (('<->'|'=') implies)*
+/// implies    := or ('->' implies)?
+/// or         := and ('∨' and)*
+/// and        := negation ('∧' negation)*
+/// negation   := '¬' negation | primary
+/// primary    := quantifier | '(' formula ')' | atomic
 /// quantifier := ('∀' | 'Ǝ') variable '.' formula
-/// negation   := '\u{00AC}' formula
-/// combination := '(' formula ('∧'|'∨'|'/\'|'\/'|'->'|'<->'|'=') formula ')'
 /// atomic     := variable | relation | constant
 /// relation   := name '(' term (',' term)* ')'
 /// term       := variable | constant | operation
 /// operation  := name '(' term (',' term)* ')'
 /// constant   := name
-/// variable   := [A-Z] '\''*
-/// name       := [a-z][a-zA-Z0-9_]*
+/// variable   := [A-Z] (alnum | '_' | '\'')*
+/// name       := [a-z] (alnum | '_')*
 /// ```
 pub fn parse_formula(s: &str) -> Result<FormulaType> {
     let s = s.trim();
@@ -28,17 +32,7 @@ pub fn parse_formula(s: &str) -> Result<FormulaType> {
     let s = s.replace(" or ", " \u{2228} ");
     let s = s.replace(" not ", "\u{00AC}");
     let s = s.trim().to_string();
-    let s = s.as_str();
-    let normalized = if s.starts_with('(')
-        || s.starts_with('\u{00AC}')
-        || s.starts_with('\u{2200}')
-        || s.starts_with('\u{018E}')
-    {
-        s.to_string()
-    } else {
-        format!("({s})")
-    };
-    let mut p = Parser::new(&normalized);
+    let mut p = Parser::new(&s);
     let ft = p.formula()?;
     p.skip_ws();
     if p.pos < p.input.len() {
@@ -93,21 +87,109 @@ impl Parser {
         }
     }
 
-    /// Dispatches to the appropriate sub-parser based on the next character:
-    /// `∀`/`Ǝ` → quantifier, `¬` → negation, `(` → combination, otherwise → atomic.
+    /// Top-level formula entry point. Precedence (lowest → highest):
+    /// `<->` / `=`  →  `->`  →  `∨`  →  `∧`  →  `¬`  →  primary.
     fn formula(&mut self) -> Result<FormulaType> {
+        self.parse_iff()
+    }
+
+    fn parse_iff(&mut self) -> Result<FormulaType> {
+        let lhs = self.parse_implies()?;
+        self.skip_ws();
+        let saved = self.pos;
+        for op in &["<->", "="] {
+            if self.rest().starts_with(op) {
+                self.pos += op.len();
+                let rhs = self.parse_iff()?;
+                let sym = logical_symbol::new(op.to_string())?;
+                return Ok(FormulaType::Combination(sym, vec![
+                    Formula { formula_type: lhs, value: None },
+                    Formula { formula_type: rhs, value: None },
+                ]));
+            }
+        }
+        self.pos = saved;
+        Ok(lhs)
+    }
+
+    fn parse_implies(&mut self) -> Result<FormulaType> {
+        let lhs = self.parse_or()?;
+        self.skip_ws();
+        let saved = self.pos;
+        if self.rest().starts_with("->") {
+            self.pos += 2;
+            let rhs = self.parse_implies()?;
+            let sym = logical_symbol::new("->".to_string())?;
+            return Ok(FormulaType::Combination(sym, vec![
+                Formula { formula_type: lhs, value: None },
+                Formula { formula_type: rhs, value: None },
+            ]));
+        }
+        self.pos = saved;
+        Ok(lhs)
+    }
+
+    fn parse_or(&mut self) -> Result<FormulaType> {
+        let mut lhs = self.parse_and()?;
+        loop {
+            self.skip_ws();
+            let saved = self.pos;
+            if self.rest().starts_with('\u{2228}') {
+                self.pos += '\u{2228}'.len_utf8();
+                let rhs = self.parse_and()?;
+                let sym = logical_symbol::new("\u{2228}".to_string())?;
+                lhs = FormulaType::Combination(sym, vec![
+                    Formula { formula_type: lhs, value: None },
+                    Formula { formula_type: rhs, value: None },
+                ]);
+            } else {
+                self.pos = saved;
+                break;
+            }
+        }
+        Ok(lhs)
+    }
+
+    fn parse_and(&mut self) -> Result<FormulaType> {
+        let mut lhs = self.parse_negation()?;
+        loop {
+            self.skip_ws();
+            let saved = self.pos;
+            if self.rest().starts_with('\u{2227}') {
+                self.pos += '\u{2227}'.len_utf8();
+                let rhs = self.parse_negation()?;
+                let sym = logical_symbol::new("\u{2227}".to_string())?;
+                lhs = FormulaType::Combination(sym, vec![
+                    Formula { formula_type: lhs, value: None },
+                    Formula { formula_type: rhs, value: None },
+                ]);
+            } else {
+                self.pos = saved;
+                break;
+            }
+        }
+        Ok(lhs)
+    }
+
+    fn parse_negation(&mut self) -> Result<FormulaType> {
+        self.skip_ws();
+        if self.rest().starts_with('\u{00AC}') {
+            self.pos += '\u{00AC}'.len_utf8();
+            let sym = logical_symbol::new("\u{00AC}".to_string())?;
+            let body = Formula { formula_type: self.parse_negation()?, value: None };
+            return Ok(FormulaType::Combination(sym, vec![body]));
+        }
+        self.formula_primary()
+    }
+
+    /// Parses a primary: quantifier, grouped `( formula )`, or atomic.
+    fn formula_primary(&mut self) -> Result<FormulaType> {
         self.skip_ws();
         if self.rest().starts_with('\u{2200}') || self.rest().starts_with('\u{018E}') {
             return self.quantifier();
         }
-        if self.rest().starts_with('\u{00AC}') {
-            self.pos += '\u{00AC}'.len_utf8();
-            let sym = logical_symbol::new("\u{00AC}".to_string())?;
-            let body = Formula { formula_type: self.formula()?, value: None };
-            return Ok(FormulaType::Combination(sym, vec![body]));
-        }
         if self.rest().starts_with('(') {
-            return self.combination();
+            return self.grouped();
         }
         self.atomic()
     }
@@ -126,39 +208,16 @@ impl Parser {
         Ok(FormulaType::Quantifier(sym, var, Box::new(body)))
     }
 
-    /// Parses a parenthesised formula: `( formula )` or `( formula connective formula )`.
-    /// A single formula in parentheses with no connective is unwrapped transparently.
-    fn combination(&mut self) -> Result<FormulaType> {
+    /// Parses a parenthesised formula: `( formula )`. The inner formula may itself
+    /// contain connectives; parentheses serve only for grouping.
+    fn grouped(&mut self) -> Result<FormulaType> {
         self.consume("(")?;
-        let lhs = self.formula()?;
-        self.skip_ws();
-        if self.rest().starts_with(')') {
-            self.pos += 1;
-            return Ok(lhs);
-        }
-        let op = self.binary_connective()?;
-        let rhs = Formula { formula_type: self.formula()?, value: None };
+        let ft = self.formula()?;
         self.consume(")")?;
-        let sym = logical_symbol::new(op)?;
-        Ok(FormulaType::Combination(sym, vec![
-            Formula { formula_type: lhs, value: None },
-            rhs,
-        ]))
+        Ok(ft)
     }
 
-    /// Reads one of the recognised binary connectives (`<=>`, `=>`, `∧`, `∨`, `==`).
-    fn binary_connective(&mut self) -> Result<String> {
-        self.skip_ws();
-        for op in &["<->", "->", "\u{2227}", "\u{2228}", "="] {
-            if self.rest().starts_with(op) {
-                self.pos += op.len();
-                return Ok(op.to_string());
-            }
-        }
-        anyhow::bail!("expected connective at position {}", self.pos)
-    }
-
-    /// Parses an atomic formula: an individual variable, a relation application
+/// Parses an atomic formula: an individual variable, a relation application
     /// `name(term, ...)`, or an individual constant.
     ///
     /// Variables are distinguished from relation/constant names by beginning with an
@@ -245,25 +304,11 @@ impl Parser {
         Ok(None)
     }
 
-    /// Parses an individual variable token: an uppercase ASCII letter followed by zero
-    /// or more letters, digits, underscores, or apostrophes.
     fn individual_variable(&mut self) -> Result<individual_variable> {
         self.skip_ws();
-        let start = self.pos;
-        match self.rest().chars().next() {
-            Some(c) if c.is_ascii_uppercase() => {
-                self.pos += c.len_utf8();
-                while let Some(c) = self.rest().chars().next() {
-                    if c.is_alphanumeric() || c == '_' || c == '\'' {
-                        self.pos += c.len_utf8();
-                    } else {
-                        break;
-                    }
-                }
-                individual_variable::new(&self.input[start..self.pos])
-            }
-            _ => anyhow::bail!("expected individual variable at position {}", self.pos),
-        }
+        let pos = self.pos;
+        self.try_parse_variable()?
+            .ok_or_else(|| anyhow::anyhow!("expected individual variable at position {}", pos))
     }
 
     /// Parses a name token: a lowercase ASCII letter followed by zero or more
@@ -339,13 +384,36 @@ mod tests {
     }
 
     #[test]
-    fn parse_formula_auto_parenthesized() {
+    fn parse_formula_grouped() {
         assert!(parse_formula("(A)").is_ok());
-        assert!(parse_formula("P->Q").is_ok());
     }
 
     #[test]
-    fn parse_formula_implication_p_implies_q() {
+    fn parse_formula_bare_connective() {
         assert!(matches!(parse_formula("P->Q"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("A -> B"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(parse_formula("(A ∨ B) -> C"), Ok(FormulaType::Combination(_, _))));
+        assert!(matches!(
+            parse_formula("(p(X) or (q(A) and r(X, A))) -> s(X)"),
+            Ok(FormulaType::Combination(_, _))
+        ));
+    }
+
+    #[test]
+    fn parse_formula_precedence() {
+        // `or` binds tighter than `->`, so this must parse as (A ∨ B) -> C, not A ∨ (B -> C)
+        let f = parse_formula("A or B -> C").unwrap();
+        // top-level connective must be `->`
+        assert!(matches!(f, FormulaType::Combination(_, _)));
+        if let FormulaType::Combination(sym, args) = &f {
+            assert_eq!(sym.symbol(), "->", "top connective should be ->");
+            // lhs should be A ∨ B (a Combination)
+            assert!(matches!(args[0].formula_type, FormulaType::Combination(_, _)));
+        }
+        // bare implies without parens: no wrapping needed
+        assert!(matches!(
+            parse_formula("tweets(X, B) or (tweets(A, B) and follows(X, A)) -> receives(X, B)"),
+            Ok(FormulaType::Combination(_, _))
+        ));
     }
 }

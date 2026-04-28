@@ -116,8 +116,7 @@ fn json_scalar_to_const(v: &Value) -> Result<term> {
     let s = match v {
         Value::Number(n) => n.to_string(),
         Value::String(s) => {
-            if is_date(s)              { s.clone() }
-            else if s.parse::<f64>().is_ok() { s.clone() }
+            if is_date(s) || s.parse::<f64>().is_ok() { s.clone() }
             else if s.chars().all(|c| c.is_alphanumeric()) { s.to_ascii_lowercase() }
             else                       { sanitize_symbol(s) }
         }
@@ -149,6 +148,7 @@ fn json_key_value_to_term(k: &str, v: &Value) -> Result<term> {
 
 /// Parse a nested JSON object into `sym(key1(val1), ...)`.
 /// Uses the object's `"symbol"` field as the symbol if present, otherwise `label`.
+#[allow(clippy::only_used_in_recursion)]
 fn json_to_term_labeled(value: &Value, label: &str) -> Result<term> {
     match value {
         Value::Object(map) => {

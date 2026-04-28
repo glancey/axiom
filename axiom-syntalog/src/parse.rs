@@ -163,94 +163,9 @@ fn wrap_equalities(s: &str) -> String {
     result.into_iter().collect()
 }
 
-/// Finds the byte index of the `)` matching the `(` at byte offset `open`.
-fn find_matching_close(s: &str, open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (i, c) in s[open..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => { depth -= 1; if depth == 0 { return Some(open + i); } }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Splits `s` on top-level (depth-0) ` or ` occurrences, returning the pieces.
-fn split_top_level_or<'a>(s: &'a str) -> Vec<&'a str> {
-    let mut parts = vec![];
-    let mut depth = 0usize;
-    let mut start = 0;
-    let mut i = 0;
-    while i < s.len() {
-        match s.as_bytes()[i] {
-            b'(' => depth += 1,
-            b')' => { if depth > 0 { depth -= 1; } }
-            b' ' if depth == 0 && s[i..].starts_with(" or ") => {
-                parts.push(&s[start..i]);
-                i += 4;
-                start = i;
-                continue;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    parts.push(&s[start..]);
-    parts
-}
-
-/// Right-nests a slice of operands with ` or `:
-/// `[A, B, C, D]` → `A or (B or (C or D))`.
-fn right_nest_or(parts: &[&str]) -> String {
-    match parts {
-        [] => String::new(),
-        [only] => only.to_string(),
-        _ => format!("{} or ({})", parts[0], right_nest_or(&parts[1..])),
-    }
-}
-
-/// Recursively scans `s` and right-nests any parenthesised group that contains
-/// multiple top-level ` or ` operands, making them parseable as binary combinations.
-fn right_nest_disjunctions(s: &str) -> String {
-    let mut result = String::new();
-    let mut i = 0;
-    while i < s.len() {
-        if s[i..].starts_with('(') {
-            let close = find_matching_close(s, i).expect("unmatched paren");
-            let inner = &s[i + 1..close];
-            let parts = split_top_level_or(inner);
-            if parts.len() > 1 {
-                let processed: Vec<String> = parts.iter()
-                    .map(|p| right_nest_disjunctions(p))
-                    .collect();
-                let refs: Vec<&str> = processed.iter().map(String::as_str).collect();
-                result.push('(');
-                result.push_str(&right_nest_or(&refs));
-                result.push(')');
-            } else {
-                result.push('(');
-                result.push_str(&right_nest_disjunctions(inner));
-                result.push(')');
-            }
-            i = close + 1;
-        } else {
-            let c = s[i..].chars().next().unwrap();
-            result.push(c);
-            i += c.len_utf8();
-        }
-    }
-    result
-}
-
 pub fn parse_formula_as_rule(s: &str) -> Result<rule> {
-    // Wrap bare lhs=rhs expressions in parens, right-nest flat `or` chains so
-    // the axiom parser (binary-only) can parse them, then wrap the whole formula
-    // in outer parens so the top-level '->' is seen as a binary connective.
     let preprocessed = wrap_equalities(s.trim());
-    let preprocessed = right_nest_disjunctions(&preprocessed);
-    let wrapped = format!("({})", preprocessed);
-    let ft = axiom_parser::parse_formula(&wrapped)?;
+    let ft = axiom_parser::parse_formula(&preprocessed)?;
     match ft {
         FormulaType::Combination(sym, mut parts)
             if sym.symbol() == "->" && parts.len() == 2 =>
